@@ -39,6 +39,11 @@ chown -R "$U:$U" "$H"
 sudo -u "$U" cmake -S "$SRC" -B "$SRC/build"
 sudo -u "$U" cmake --build "$SRC/build" --target meshui -j2
 
+# Helper privilégié + sudoers NOPASSWD limités (pour les contrôles dans l'UI)
+install -m 755 "$SRC/deploy/meshui-ctl"      /usr/local/sbin/meshui-ctl
+install -m 440 -o root -g root "$SRC/deploy/meshui-sudoers" /etc/sudoers.d/meshui
+visudo -c -f /etc/sudoers.d/meshui
+
 # Services systemd
 install -m 644 "$SRC/deploy/meshui.service" /etc/systemd/system/meshui.service
 install -m 644 "$SRC/deploy/meshui-splash.service" /etc/systemd/system/meshui-splash.service

@@ -3,8 +3,10 @@
 #include "theme.h"
 #include "mesh.h"
 #include "calib.h"
+#include "sys.h"
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 
 /* ---------------------------------------------------------------- état */
 static lv_obj_t *content;          /* zone centrale, reconstruite par onglet */
@@ -295,60 +297,350 @@ static void build_nodes(void) {
 }
 
 /* ---------------------------------------------------------------- vue SYS */
-static void stat_card(lv_obj_t *parent, const char *k, const char *v, uint32_t col) {
-    lv_obj_t *c = lv_obj_create(parent);
-    lv_obj_set_size(c, LV_PCT(48), LV_SIZE_CONTENT);
-    panel(c, CY_BORDER);
-    lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *kl = label(c, k, FONT_SMALL, CY_DIM);
-    lv_obj_align(kl, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_t *vl = label(c, v, FONT_BIG, col);
-    lv_obj_align(vl, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_obj_set_style_pad_top(vl, 16, 0);
+static lv_obj_t *sys_lbl_host, *sys_lbl_ipw, *sys_lbl_ipu, *sys_lbl_uptime;
+static lv_obj_t *sys_lbl_cpu, *sys_lbl_mem, *sys_lbl_disk, *sys_lbl_thr, *sys_lbl_kernel;
+static lv_obj_t *sys_lbl_ssh_state, *sys_lbl_ssh_btn, *sys_btn_ssh;
+static lv_obj_t *sys_lbl_wifi;
+static lv_timer_t *sys_refresh_timer;
+
+static lv_obj_t *info_row(lv_obj_t *parent, const char *key) {
+    lv_obj_t *r = lv_obj_create(parent);
+    lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(r);
+    lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_ver(r, 1, 0);
+    label(r, key, FONT_SMALL, CY_DIM);
+    lv_obj_t *v = label(r, "-", FONT_SMALL, CY_TEXT);
+    return v;
 }
 
-static void calib_cb(lv_event_t *e) {
-    (void)e;
-    calib_start(NULL);
+static lv_obj_t *section(lv_obj_t *parent, const char *title) {
+    label(parent, title, FONT_SMALL, CY_CYAN);
+    lv_obj_t *p = lv_obj_create(parent);
+    lv_obj_set_size(p, LV_PCT(100), LV_SIZE_CONTENT);
+    panel(p, CY_BORDER);
+    lv_obj_set_style_pad_all(p, 6, 0);
+    lv_obj_set_flex_flow(p, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(p, 3, 0);
+    lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
+    return p;
+}
+
+static lv_obj_t *small_button(lv_obj_t *parent, const char *txt, uint32_t color, lv_event_cb_t cb) {
+    lv_obj_t *b = lv_button_create(parent);
+    lv_obj_set_height(b, 32);
+    lv_obj_set_flex_grow(b, 1);
+    lv_obj_set_style_radius(b, 2, 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
+    lv_obj_set_style_border_width(b, 1, 0);
+    lv_obj_set_style_border_color(b, lv_color_hex(color), 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    if (cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l = label(b, txt, FONT_SMALL, CY_TEXT);
+    lv_obj_center(l);
+    return b;
+}
+
+static void confirm_dialog(const char *msg, void (*on_yes)(void));
+static void reboot_yes(void)   { sys_reboot(); }
+static void shutdown_yes(void) { sys_shutdown(); }
+static void reboot_cb(lv_event_t *e)   { (void)e; confirm_dialog("Redemarrer ?", reboot_yes); }
+static void shutdown_cb(lv_event_t *e) { (void)e; confirm_dialog("Eteindre ?",    shutdown_yes); }
+static void calib_cb(lv_event_t *e)    { (void)e; calib_start(NULL); }
+static void ssh_toggle_cb(lv_event_t *e) { (void)e; sys_ssh_set(!sys_ssh_running()); }
+static void wifi_modal_open(void);
+static void wifi_btn_cb(lv_event_t *e) { (void)e; wifi_modal_open(); }
+
+static void sys_refresh(lv_timer_t *t) {
+    (void)t;
+    if (!sys_lbl_host) return;
+    sys_info_t i;
+    sys_info_get(&i);
+    char b[80];
+    lv_label_set_text(sys_lbl_host,   i.hostname);
+    lv_label_set_text(sys_lbl_ipw,    i.ip_wlan);
+    lv_label_set_text(sys_lbl_ipu,    i.ip_usb);
+    lv_label_set_text(sys_lbl_uptime, i.uptime);
+    snprintf(b, sizeof(b), "%.1f C", i.cpu_temp_c);  lv_label_set_text(sys_lbl_cpu, b);
+    snprintf(b, sizeof(b), "%d / %d MB", i.mem_used_mb, i.mem_total_mb); lv_label_set_text(sys_lbl_mem, b);
+    snprintf(b, sizeof(b), "%d %%", i.disk_used_pct); lv_label_set_text(sys_lbl_disk, b);
+    lv_label_set_text(sys_lbl_thr, i.throttled_now ? "SOUS-TENSION" : (i.throttled_ever ? "deja eu" : "ok"));
+    lv_obj_set_style_text_color(sys_lbl_thr,
+        lv_color_hex(i.throttled_now ? CY_AMBER : (i.throttled_ever ? CY_DIM : CY_GREEN)), 0);
+    lv_label_set_text(sys_lbl_kernel, i.kernel);
+
+    bool running = sys_ssh_running();
+    lv_label_set_text(sys_lbl_ssh_state, running ? "actif" : "arrete");
+    lv_obj_set_style_text_color(sys_lbl_ssh_state,
+        lv_color_hex(running ? CY_GREEN : CY_DIM), 0);
+    lv_label_set_text(sys_lbl_ssh_btn, running ? "DESACTIVER" : "ACTIVER");
+
+    if (i.wifi_signal >= 0)
+        snprintf(b, sizeof(b), "%s  (%d%%)", i.wifi_ssid, i.wifi_signal);
+    else
+        snprintf(b, sizeof(b), "%s", i.wifi_ssid);
+    lv_label_set_text(sys_lbl_wifi, b);
 }
 
 static void build_sys(void) {
-    const mesh_self_t *s = mesh_self();
-    lv_obj_t *grid = lv_obj_create(content);
-    lv_obj_set_size(grid, LV_PCT(100), LV_PCT(100));
-    flat(grid);
-    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_pad_all(grid, 5, 0);
-    lv_obj_set_style_pad_row(grid, 5, 0);
-    lv_obj_set_style_pad_column(grid, 5, 0);
-    lv_obj_set_scroll_dir(grid, LV_DIR_VER);
+    lv_obj_t *col = lv_obj_create(content);
+    lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
+    flat(col);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(col, 5, 0);
+    lv_obj_set_style_pad_row(col, 3, 0);
+    lv_obj_set_scroll_dir(col, LV_DIR_VER);
 
-    char b[32];
-    snprintf(b, sizeof(b), "%d%%", s->batt);       stat_card(grid, "BATTERIE", b, s->batt < 25 ? CY_AMBER : CY_GREEN);
-    snprintf(b, sizeof(b), "%.2fV", s->volt);       stat_card(grid, "TENSION", b, CY_CYAN);
-    snprintf(b, sizeof(b), "%.1f%%", s->chan_util); stat_card(grid, "CANAL", b, CY_CYAN);
-    snprintf(b, sizeof(b), "%.1f%%", s->air_tx);    stat_card(grid, "AIR TX", b, CY_CYAN);
-    stat_card(grid, "REGION", s->region, CY_MAGENTA);
-    stat_card(grid, "PRESET", s->preset, CY_MAGENTA);
-    snprintf(b, sizeof(b), "%d", s->nodes);         stat_card(grid, "NOEUDS", b, CY_CYAN);
-    stat_card(grid, "UPTIME", s->uptime, CY_CYAN);
+    lv_obj_t *s = section(col, "INFO");
+    sys_lbl_host   = info_row(s, "hostname");
+    sys_lbl_ipw    = info_row(s, "ip wlan");
+    sys_lbl_ipu    = info_row(s, "ip usb");
+    sys_lbl_uptime = info_row(s, "uptime");
+    sys_lbl_cpu    = info_row(s, "cpu");
+    sys_lbl_mem    = info_row(s, "ram");
+    sys_lbl_disk   = info_row(s, "disque /");
+    sys_lbl_thr    = info_row(s, "alim");
+    sys_lbl_kernel = info_row(s, "noyau");
 
-    lv_obj_t *cal = lv_button_create(grid);
-    lv_obj_set_width(cal, LV_PCT(100));
-    lv_obj_set_height(cal, 34);
-    lv_obj_set_style_radius(cal, 2, 0);
-    lv_obj_set_style_bg_opa(cal, LV_OPA_30, 0);
-    lv_obj_set_style_bg_color(cal, lv_color_hex(CY_CYAN), 0);
-    lv_obj_set_style_border_width(cal, 1, 0);
-    lv_obj_set_style_border_color(cal, lv_color_hex(CY_CYAN), 0);
-    lv_obj_set_style_shadow_width(cal, 0, 0);
-    lv_obj_add_event_cb(cal, calib_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *cl = label(cal, LV_SYMBOL_GPS "  CALIBRER L'ECRAN", FONT_BODY, CY_TEXT);
-    lv_obj_center(cl);
+    s = section(col, "ALIMENTATION");
+    lv_obj_t *row = lv_obj_create(s);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(row); lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, 6, 0); lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(row, LV_SYMBOL_POWER "  ETEINDRE",   CY_MAGENTA, shutdown_cb);
+    small_button(row, LV_SYMBOL_REFRESH "  REDEMARRER", CY_CYAN,  reboot_cb);
+
+    s = section(col, "SSH");
+    lv_obj_t *r2 = lv_obj_create(s);
+    lv_obj_set_size(r2, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(r2); lv_obj_set_flex_flow(r2, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(r2, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(r2, LV_OBJ_FLAG_SCROLLABLE);
+    sys_lbl_ssh_state = label(r2, "?", FONT_BODY, CY_DIM);
+    sys_btn_ssh = lv_button_create(r2);
+    lv_obj_set_size(sys_btn_ssh, 130, 30);
+    lv_obj_set_style_radius(sys_btn_ssh, 2, 0);
+    lv_obj_set_style_bg_opa(sys_btn_ssh, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(sys_btn_ssh, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(sys_btn_ssh, 1, 0);
+    lv_obj_set_style_border_color(sys_btn_ssh, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_shadow_width(sys_btn_ssh, 0, 0);
+    lv_obj_add_event_cb(sys_btn_ssh, ssh_toggle_cb, LV_EVENT_CLICKED, NULL);
+    sys_lbl_ssh_btn = label(sys_btn_ssh, "?", FONT_SMALL, CY_TEXT);
+    lv_obj_center(sys_lbl_ssh_btn);
+
+    s = section(col, "WIFI");
+    lv_obj_t *r3 = lv_obj_create(s);
+    lv_obj_set_size(r3, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(r3); lv_obj_set_flex_flow(r3, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(r3, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(r3, LV_OBJ_FLAG_SCROLLABLE);
+    sys_lbl_wifi = label(r3, "-", FONT_SMALL, CY_TEXT);
+    lv_obj_t *wbtn = lv_button_create(r3);
+    lv_obj_set_size(wbtn, 110, 30);
+    lv_obj_set_style_radius(wbtn, 2, 0);
+    lv_obj_set_style_bg_opa(wbtn, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(wbtn, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_border_width(wbtn, 1, 0);
+    lv_obj_set_style_border_color(wbtn, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_shadow_width(wbtn, 0, 0);
+    lv_obj_add_event_cb(wbtn, wifi_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *wl = label(wbtn, LV_SYMBOL_WIFI "  RESEAUX", FONT_SMALL, CY_TEXT);
+    lv_obj_center(wl);
+
+    s = section(col, "ECRAN");
+    small_button(s, LV_SYMBOL_GPS "  CALIBRER L'ECRAN", CY_CYAN, calib_cb);
+
+    sys_refresh(NULL);
+    sys_refresh_timer = lv_timer_create(sys_refresh, 5000, NULL);
+}
+
+/* ------------- confirmation modale ------------- */
+static lv_obj_t *confirm_ov;
+static void (*confirm_yes_cb)(void);
+static void confirm_close(void) { if (confirm_ov) { lv_obj_delete(confirm_ov); confirm_ov = NULL; } }
+static void confirm_yes_e(lv_event_t *e) { (void)e; void (*cb)(void) = confirm_yes_cb; confirm_close(); if (cb) cb(); }
+static void confirm_no_e (lv_event_t *e) { (void)e; confirm_close(); }
+static void confirm_dialog(const char *msg, void (*on_yes)(void)) {
+    confirm_yes_cb = on_yes;
+    confirm_ov = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(confirm_ov, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(confirm_ov, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_bg_opa(confirm_ov, LV_OPA_80, 0);
+    lv_obj_set_style_border_width(confirm_ov, 0, 0);
+    lv_obj_set_style_radius(confirm_ov, 0, 0);
+    lv_obj_clear_flag(confirm_ov, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *box = lv_obj_create(confirm_ov);
+    lv_obj_set_size(box, 260, 140);
+    lv_obj_center(box);
+    panel(box, CY_CYAN);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *t = label(box, msg, FONT_BODY, CY_TEXT);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 6);
+    lv_obj_t *row = lv_obj_create(box);
+    lv_obj_set_size(row, LV_PCT(100), 38);
+    flat(row); lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, 8, 0);
+    lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(row, "ANNULER",   CY_DIM,     confirm_no_e);
+    small_button(row, "CONFIRMER", CY_MAGENTA, confirm_yes_e);
+}
+
+/* ------------- modal WiFi ------------- */
+static lv_obj_t *wifi_ov, *wifi_list_ov, *wifi_status, *wifi_pwd_panel, *wifi_pwd_ta;
+static char wifi_pending_ssid[64];
+
+static void wifi_modal_close_e(lv_event_t *e) { (void)e; if (wifi_ov) { lv_obj_delete(wifi_ov); wifi_ov = NULL; } }
+
+static void wifi_scan_done(const wifi_net_t *list, int n, void *user);
+static void wifi_rescan_e(lv_event_t *e) {
+    (void)e;
+    lv_label_set_text(wifi_status, "scan en cours...");
+    if (wifi_list_ov) lv_obj_clean(wifi_list_ov);
+    sys_wifi_scan_async(wifi_scan_done, NULL);
+}
+
+static void wifi_connect_done(bool ok, const char *msg, void *user) {
+    (void)user;
+    if (!wifi_status) return;
+    lv_label_set_text(wifi_status, ok ? "connecte" : msg);
+    lv_obj_set_style_text_color(wifi_status, lv_color_hex(ok ? CY_GREEN : CY_MAGENTA), 0);
+}
+
+static void wifi_pwd_ok_e(lv_event_t *e) {
+    (void)e;
+    const char *p = lv_textarea_get_text(wifi_pwd_ta);
+    lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+    if (wifi_pwd_panel) { lv_obj_delete(wifi_pwd_panel); wifi_pwd_panel = NULL; }
+    lv_label_set_text(wifi_status, "connexion...");
+    lv_obj_set_style_text_color(wifi_status, lv_color_hex(CY_CYAN), 0);
+    sys_wifi_connect_async(wifi_pending_ssid, p, wifi_connect_done, NULL);
+}
+static void wifi_pwd_cancel_e(lv_event_t *e) {
+    (void)e;
+    lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+    if (wifi_pwd_panel) { lv_obj_delete(wifi_pwd_panel); wifi_pwd_panel = NULL; }
+}
+static void wifi_pwd_ta_e(lv_event_t *e) {
+    (void)e;
+    lv_keyboard_set_textarea(kb, wifi_pwd_ta);
+    lv_obj_clear_flag(kb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(kb);
+}
+
+static void wifi_open_pwd(const char *ssid) {
+    strncpy(wifi_pending_ssid, ssid, sizeof(wifi_pending_ssid) - 1);
+    wifi_pwd_panel = lv_obj_create(wifi_ov);
+    lv_obj_set_size(wifi_pwd_panel, LV_PCT(94), 130);
+    lv_obj_align(wifi_pwd_panel, LV_ALIGN_CENTER, 0, -10);
+    panel(wifi_pwd_panel, CY_MAGENTA);
+    lv_obj_clear_flag(wifi_pwd_panel, LV_OBJ_FLAG_SCROLLABLE);
+    char b[96]; snprintf(b, sizeof(b), "SSID : %s", ssid);
+    lv_obj_t *t = label(wifi_pwd_panel, b, FONT_SMALL, CY_TEXT);
+    lv_obj_align(t, LV_ALIGN_TOP_LEFT, 0, 0);
+    wifi_pwd_ta = lv_textarea_create(wifi_pwd_panel);
+    lv_textarea_set_one_line(wifi_pwd_ta, true);
+    lv_textarea_set_password_mode(wifi_pwd_ta, true);
+    lv_textarea_set_placeholder_text(wifi_pwd_ta, "passphrase");
+    lv_obj_set_size(wifi_pwd_ta, LV_PCT(100), 32);
+    lv_obj_align(wifi_pwd_ta, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(wifi_pwd_ta, lv_color_hex(CY_PANEL2), 0);
+    lv_obj_set_style_text_font(wifi_pwd_ta, FONT_BODY, 0);
+    lv_obj_set_style_text_color(wifi_pwd_ta, lv_color_hex(CY_TEXT), 0);
+    lv_obj_add_event_cb(wifi_pwd_ta, wifi_pwd_ta_e, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *rr = lv_obj_create(wifi_pwd_panel);
+    lv_obj_set_size(rr, LV_PCT(100), 34);
+    flat(rr); lv_obj_set_flex_flow(rr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(rr, 6, 0);
+    lv_obj_align(rr, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_clear_flag(rr, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(rr, "ANNULER",  CY_DIM,     wifi_pwd_cancel_e);
+    small_button(rr, "CONNECTER", CY_MAGENTA, wifi_pwd_ok_e);
+}
+
+static void wifi_row_cb(lv_event_t *e) {
+    wifi_net_t *n = lv_event_get_user_data(e);
+    if (n->secured) {
+        wifi_open_pwd(n->ssid);
+    } else {
+        lv_label_set_text(wifi_status, "connexion...");
+        sys_wifi_connect_async(n->ssid, "", wifi_connect_done, NULL);
+    }
+}
+
+static wifi_net_t wifi_kept[32];
+static int wifi_kept_n = 0;
+
+static void wifi_scan_done(const wifi_net_t *list, int n, void *user) {
+    (void)user;
+    if (!wifi_list_ov) return;
+    lv_obj_clean(wifi_list_ov);
+    if (n == 0) { lv_label_set_text(wifi_status, "aucun reseau"); return; }
+    wifi_kept_n = 0;
+    for (int i = 0; i < n && wifi_kept_n < 32; i++) {
+        int found = -1;
+        for (int j = 0; j < wifi_kept_n; j++)
+            if (strcmp(wifi_kept[j].ssid, list[i].ssid) == 0) { found = j; break; }
+        if (found < 0) wifi_kept[wifi_kept_n++] = list[i];
+        else if (list[i].signal > wifi_kept[found].signal) wifi_kept[found] = list[i];
+    }
+    for (int i = 0; i < wifi_kept_n; i++) {
+        lv_obj_t *r = lv_button_create(wifi_list_ov);
+        lv_obj_set_size(r, LV_PCT(100), 34);
+        lv_obj_set_style_radius(r, 2, 0);
+        lv_obj_set_style_bg_opa(r, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(r, 1, 0);
+        lv_obj_set_style_border_color(r, lv_color_hex(wifi_kept[i].active ? CY_CYAN : CY_BORDER), 0);
+        lv_obj_set_style_shadow_width(r, 0, 0);
+        lv_obj_add_event_cb(r, wifi_row_cb, LV_EVENT_CLICKED, &wifi_kept[i]);
+        char b[96];
+        snprintf(b, sizeof(b), "%s%s  %s  %d%%",
+                 wifi_kept[i].active ? LV_SYMBOL_OK " " : "",
+                 wifi_kept[i].secured ? LV_SYMBOL_EYE_CLOSE : "#",
+                 wifi_kept[i].ssid, wifi_kept[i].signal);
+        lv_obj_t *l = label(r, b, FONT_SMALL,
+            wifi_kept[i].active ? CY_GREEN : (wifi_kept[i].secured ? CY_MAGENTA : CY_TEXT));
+        lv_obj_align(l, LV_ALIGN_LEFT_MID, 6, 0);
+    }
+    lv_label_set_text(wifi_status, "");
+}
+
+static void wifi_modal_open(void) {
+    wifi_ov = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(wifi_ov, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(wifi_ov, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_bg_opa(wifi_ov, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(wifi_ov, 0, 0);
+    lv_obj_set_style_radius(wifi_ov, 0, 0);
+    lv_obj_set_style_pad_all(wifi_ov, 6, 0);
+    lv_obj_clear_flag(wifi_ov, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *bar = lv_obj_create(wifi_ov);
+    lv_obj_set_size(bar, LV_PCT(100), 34);
+    flat(bar); lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(bar, 6, 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(bar, LV_SYMBOL_LEFT "  FERMER",   CY_DIM,  wifi_modal_close_e);
+    small_button(bar, LV_SYMBOL_REFRESH "  RESCAN", CY_CYAN, wifi_rescan_e);
+    wifi_status = label(wifi_ov, "scan en cours...", FONT_SMALL, CY_CYAN);
+    lv_obj_align(wifi_status, LV_ALIGN_TOP_MID, 0, 44);
+    wifi_list_ov = lv_obj_create(wifi_ov);
+    lv_obj_set_size(wifi_list_ov, LV_PCT(100), LV_PCT(100) - 70);
+    lv_obj_align(wifi_list_ov, LV_ALIGN_BOTTOM_MID, 0, -2);
+    flat(wifi_list_ov);
+    lv_obj_set_flex_flow(wifi_list_ov, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(wifi_list_ov, 4, 0);
+    lv_obj_set_scroll_dir(wifi_list_ov, LV_DIR_VER);
+    sys_wifi_scan_async(wifi_scan_done, NULL);
 }
 
 /* ---------------------------------------------------------------- routage */
 static void show_tab(int tab) {
+    if (sys_refresh_timer) { lv_timer_delete(sys_refresh_timer); sys_refresh_timer = NULL; }
+    sys_lbl_host = NULL;   /* invalidé par lv_obj_clean */
     cur_tab = tab;
     lv_obj_clean(content);
     if (tab == 0)      build_chat();
@@ -383,23 +675,58 @@ void ui_show_splash(void (*done)(void)) {
     lv_obj_set_style_radius(splash_ov, 0, 0);
     lv_obj_clear_flag(splash_ov, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *title = label(splash_ov, "MESH//OS", &lv_font_montserrat_28, CY_CYAN);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, -44);
+    /* Crochets cyan aux 4 coins */
+    static const int corners[4][4] = {
+        {  6,    6,    1,  1 },
+        { -7,    6,   -1,  1 },
+        {  6,   -7,    1, -1 },
+        { -7,   -7,   -1, -1 },
+    };
+    for (int i = 0; i < 4; i++) {
+        int x = corners[i][0] >= 0 ? corners[i][0] : (320 + corners[i][0]);
+        int y = corners[i][1] >= 0 ? corners[i][1] : (480 + corners[i][1]);
+        int dx = corners[i][2], dy = corners[i][3];
+        lv_obj_t *h = lv_obj_create(splash_ov);
+        lv_obj_set_size(h, 22, 2);
+        lv_obj_set_pos(h, dx > 0 ? x : x - 22, y);
+        lv_obj_set_style_bg_color(h, lv_color_hex(CY_CYAN), 0);
+        lv_obj_set_style_border_width(h, 0, 0); lv_obj_set_style_radius(h, 0, 0);
+        lv_obj_t *v = lv_obj_create(splash_ov);
+        lv_obj_set_size(v, 2, 22);
+        lv_obj_set_pos(v, x, dy > 0 ? y : y - 22);
+        lv_obj_set_style_bg_color(v, lv_color_hex(CY_CYAN), 0);
+        lv_obj_set_style_border_width(v, 0, 0); lv_obj_set_style_radius(v, 0, 0);
+    }
 
-    lv_obj_t *sub = label(splash_ov, "node // NODE-7F3A", FONT_SMALL, CY_MAGENTA);
-    lv_obj_align(sub, LV_ALIGN_CENTER, 0, -10);
+    lv_obj_t *title = label(splash_ov, "BugQuest", &lv_font_montserrat_28, CY_CYAN);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, -70);
+
+    lv_obj_t *sub = label(splash_ov, "/ / L O R A", &lv_font_montserrat_20, CY_MAGENTA);
+    lv_obj_align(sub, LV_ALIGN_CENTER, 0, -30);
+
+    lv_obj_t *divider = lv_obj_create(splash_ov);
+    lv_obj_set_size(divider, 160, 1);
+    lv_obj_set_style_bg_color(divider, lv_color_hex(CY_BORDER), 0);
+    lv_obj_set_style_border_width(divider, 0, 0);
+    lv_obj_set_style_radius(divider, 0, 0);
+    lv_obj_align(divider, LV_ALIGN_CENTER, 0, 8);
+
+    lv_obj_t *node = label(splash_ov, "node // NODE-7F3A", FONT_SMALL, CY_DIM);
+    lv_obj_align(node, LV_ALIGN_CENTER, 0, 22);
 
     lv_obj_t *bar = lv_bar_create(splash_ov);
     lv_obj_set_size(bar, 180, 4);
-    lv_obj_align(bar, LV_ALIGN_CENTER, 0, 28);
+    lv_obj_align(bar, LV_ALIGN_CENTER, 0, 52);
     lv_obj_set_style_bg_color(bar, lv_color_hex(CY_PANEL2), LV_PART_MAIN);
     lv_obj_set_style_radius(bar, 0, LV_PART_MAIN);
     lv_obj_set_style_bg_color(bar, lv_color_hex(CY_CYAN), LV_PART_INDICATOR);
     lv_obj_set_style_radius(bar, 0, LV_PART_INDICATOR);
     lv_bar_set_range(bar, 0, 100);
 
-    lv_obj_t *foot = label(splash_ov, "INITIALISATION...", FONT_SMALL, CY_DIM);
-    lv_obj_align(foot, LV_ALIGN_BOTTOM_MID, 0, -24);
+    lv_obj_t *foot = label(splash_ov, "[ initialisation ]", FONT_SMALL, CY_CYAN);
+    lv_obj_align(foot, LV_ALIGN_BOTTOM_MID, 0, -32);
+    lv_obj_t *ver = label(splash_ov, "v0.1", FONT_SMALL, CY_DIM);
+    lv_obj_align(ver, LV_ALIGN_BOTTOM_MID, 0, -14);
 
     lv_anim_t a;
     lv_anim_init(&a);

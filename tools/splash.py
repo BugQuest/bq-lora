@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# Boot splash : dessine un ecran cyberpunk et l'envoie sur /dev/fb0 (RGB565).
-# Lance tot au boot par meshui-splash.service, avant que meshui ne prenne la main.
+# Boot splash : ecran cyberpunk "BugQuest // LORA", blit RGB565 sur /dev/fb0.
 from PIL import Image, ImageDraw, ImageFont
 import struct
 
@@ -16,24 +15,51 @@ DIM = (82, 103, 122)
 BORDER = (27, 42, 61)
 BG = (7, 10, 15)
 
-def font(sz):
+def font(sz, bold=True):
+    p = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf' if bold else \
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
     try:
-        return ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', sz)
+        return ImageFont.truetype(p, sz)
     except Exception:
         return ImageFont.load_default()
 
-img = Image.new('RGB', (w, h), BG)
-d = ImageDraw.Draw(img)
-d.rectangle([4, 4, w - 5, h - 5], outline=BORDER)
-
-def centered(text, f, y, fill):
+def text_centered(d, text, f, y, fill):
     b = d.textbbox((0, 0), text, font=f)
     d.text(((w - (b[2] - b[0])) / 2 - b[0], y), text, font=f, fill=fill)
 
-centered("MESH//OS", font(34), h / 2 - 78, CY)
-centered("node // NODE-7F3A", font(15), h / 2 - 24, MA)
-d.line([w / 2 - 70, h / 2 + 16, w / 2 + 70, h / 2 + 16], fill=BORDER)
-centered("booting...", font(13), h - 52, DIM)
+def text_at(d, text, f, x, y, fill):
+    d.text((x, y), text, font=f, fill=fill)
+
+img = Image.new('RGB', (w, h), BG)
+d = ImageDraw.Draw(img)
+
+# crochets aux 4 coins
+L = 22; T = 2
+def bracket(x, y, dx, dy):
+    d.line([(x, y), (x + dx * L, y)], fill=CY, width=T)
+    d.line([(x, y), (x, y + dy * L)], fill=CY, width=T)
+bracket(6,   6,    1,  1)
+bracket(w-7, 6,   -1,  1)
+bracket(6,   h-7,  1, -1)
+bracket(w-7, h-7, -1, -1)
+
+# titre
+text_centered(d, "BugQuest", font(36), h/2 - 84, CY)
+
+# sous-titre lettré : "// L O R A"
+sub_f = font(20)
+sub = "/ / L O R A"
+text_centered(d, sub, sub_f, h/2 - 36, MA)
+
+# divider
+d.line([(w/2 - 80, h/2 + 10), (w/2 + 80, h/2 + 10)], fill=BORDER, width=1)
+
+# noeud
+text_centered(d, "node // NODE-7F3A", font(13, False), h/2 + 22, DIM)
+
+# bandeau bas
+text_centered(d, "[ initialisation ]", font(13), h - 56, CY)
+text_centered(d, "v0.1", font(11, False), h - 34, DIM)
 
 # Conversion RGB565 + ecriture framebuffer (respecte le stride)
 px = img.load()

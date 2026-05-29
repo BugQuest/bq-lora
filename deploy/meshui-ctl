@@ -1,0 +1,35 @@
+#!/bin/sh
+# Helper privilegie pour meshui : seules ces operations sont autorisees via
+# sudo NOPASSWD (cf. /etc/sudoers.d/meshui). Garder cette surface reduite.
+set -e
+case "$1" in
+    reboot)
+        exec /sbin/reboot
+        ;;
+    poweroff)
+        exec /sbin/poweroff
+        ;;
+    ssh-on)
+        systemctl enable ssh
+        systemctl start ssh
+        ;;
+    ssh-off)
+        systemctl stop ssh
+        systemctl disable ssh
+        ;;
+    wifi-scan)
+        exec /usr/bin/nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list --rescan yes
+        ;;
+    wifi-connect)
+        # $2 = SSID, $3 = passphrase (peut etre vide pour reseau ouvert)
+        if [ -z "$3" ]; then
+            exec /usr/bin/nmcli device wifi connect "$2"
+        else
+            exec /usr/bin/nmcli device wifi connect "$2" password "$3"
+        fi
+        ;;
+    *)
+        echo "usage: $0 {reboot|poweroff|ssh-on|ssh-off|wifi-scan|wifi-connect SSID [PASS]}" >&2
+        exit 2
+        ;;
+esac
