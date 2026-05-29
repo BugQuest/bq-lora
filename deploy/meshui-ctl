@@ -20,6 +20,15 @@ case "$1" in
     restart-meshui)
         exec systemctl restart meshui
         ;;
+    hotspot-on)
+        SSID="${2:-BugQuest-Lora}"
+        PASS="${3:-bugquest-lora}"
+        /usr/bin/nmcli connection up Hotspot 2>/dev/null \
+            || exec /usr/bin/nmcli device wifi hotspot ifname wlan0 ssid "$SSID" password "$PASS"
+        ;;
+    hotspot-off)
+        exec /usr/bin/nmcli connection down Hotspot
+        ;;
     wifi-scan)
         exec /usr/bin/nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list --rescan yes
         ;;

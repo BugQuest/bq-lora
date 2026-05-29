@@ -301,6 +301,7 @@ static lv_obj_t *sys_lbl_host, *sys_lbl_ipw, *sys_lbl_ipu, *sys_lbl_uptime;
 static lv_obj_t *sys_lbl_cpu, *sys_lbl_mem, *sys_lbl_disk, *sys_lbl_thr, *sys_lbl_kernel;
 static lv_obj_t *sys_lbl_ssh_state, *sys_lbl_ssh_btn, *sys_btn_ssh;
 static lv_obj_t *sys_lbl_wifi;
+static lv_obj_t *sys_lbl_hot_state, *sys_lbl_hot_btn;
 static lv_timer_t *sys_refresh_timer;
 
 static lv_obj_t *info_row(lv_obj_t *parent, const char *key) {
@@ -353,6 +354,15 @@ static void shutdown_cb(lv_event_t *e)    { (void)e; confirm_dialog("Eteindre le
 static void restart_app_cb(lv_event_t *e) { (void)e; confirm_dialog("Relancer meshui ?",   restart_app_yes); }
 static void calib_cb(lv_event_t *e)    { (void)e; calib_start(NULL); }
 static void ssh_toggle_cb(lv_event_t *e) { (void)e; sys_ssh_set(!sys_ssh_running()); }
+
+static void hot_yes(void)        { sys_hotspot_set(!sys_hotspot_active()); }
+static void hot_toggle_cb(lv_event_t *e) {
+    (void)e;
+    bool on = sys_hotspot_active();
+    confirm_dialog(on ? "Desactiver le hotspot ?"
+                      : "Activer le hotspot ?\n(coupe le WiFi actuel)",
+                   hot_yes);
+}
 static void wifi_modal_open(void);
 static void wifi_btn_cb(lv_event_t *e) { (void)e; wifi_modal_open(); }
 
@@ -385,6 +395,14 @@ static void sys_refresh(lv_timer_t *t) {
     else
         snprintf(b, sizeof(b), "%s", i.wifi_ssid);
     lv_label_set_text(sys_lbl_wifi, b);
+
+    if (sys_lbl_hot_state) {
+        bool hot = sys_hotspot_active();
+        lv_label_set_text(sys_lbl_hot_state, hot ? "actif" : "inactif");
+        lv_obj_set_style_text_color(sys_lbl_hot_state,
+            lv_color_hex(hot ? CY_GREEN : CY_DIM), 0);
+        lv_label_set_text(sys_lbl_hot_btn, hot ? "DESACTIVER" : "ACTIVER");
+    }
 }
 
 static void build_sys(void) {
@@ -452,6 +470,27 @@ static void build_sys(void) {
     lv_obj_add_event_cb(wbtn, wifi_btn_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *wl = label(wbtn, LV_SYMBOL_WIFI "  RESEAUX", FONT_SMALL, CY_TEXT);
     lv_obj_center(wl);
+
+    s = section(col, "HOTSPOT");
+    lv_obj_t *r4 = lv_obj_create(s);
+    lv_obj_set_size(r4, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(r4); lv_obj_set_flex_flow(r4, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(r4, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(r4, LV_OBJ_FLAG_SCROLLABLE);
+    sys_lbl_hot_state = label(r4, "?", FONT_BODY, CY_DIM);
+    lv_obj_t *hbtn = lv_button_create(r4);
+    lv_obj_set_size(hbtn, 130, 30);
+    lv_obj_set_style_radius(hbtn, 2, 0);
+    lv_obj_set_style_bg_opa(hbtn, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(hbtn, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_border_width(hbtn, 1, 0);
+    lv_obj_set_style_border_color(hbtn, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_shadow_width(hbtn, 0, 0);
+    lv_obj_add_event_cb(hbtn, hot_toggle_cb, LV_EVENT_CLICKED, NULL);
+    sys_lbl_hot_btn = label(hbtn, "?", FONT_SMALL, CY_TEXT);
+    lv_obj_center(sys_lbl_hot_btn);
+    lv_obj_t *credline = label(s, "SSID: " HOTSPOT_SSID "   pass: " HOTSPOT_PASS, FONT_SMALL, CY_DIM);
+    (void)credline;
 
     s = section(col, "APPLICATION");
     small_button(s, LV_SYMBOL_REFRESH "  RELANCER MESHUI", CY_CYAN, restart_app_cb);

@@ -146,6 +146,24 @@ void sys_ssh_set(bool on)
     system(cmd);
 }
 
+bool sys_hotspot_active(void)
+{
+    char b[16];
+    run_get("nmcli -t -f NAME connection show --active 2>/dev/null | grep -c '^Hotspot$'",
+            b, sizeof(b));
+    return atoi(b) > 0;
+}
+
+void sys_hotspot_set(bool on)
+{
+    char cmd[160];
+    if (on)
+        snprintf(cmd, sizeof(cmd), CTL " hotspot-on '%s' '%s' &", HOTSPOT_SSID, HOTSPOT_PASS);
+    else
+        snprintf(cmd, sizeof(cmd), CTL " hotspot-off &");
+    system(cmd);
+}
+
 /* ---------- WiFi (asynchrone, via pthread + lv_async_call) ---------- */
 typedef struct {
     wifi_scan_cb_t cb;

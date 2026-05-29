@@ -28,6 +28,12 @@ bool sys_ssh_enabled(void);
 bool sys_ssh_running(void);
 void sys_ssh_set(bool on);
 
+bool sys_hotspot_active(void);
+void sys_hotspot_set(bool on);
+/* SSID/passphrase utilisés par le hotspot (constantes affichées à l'écran). */
+#define HOTSPOT_SSID "BugQuest-Lora"
+#define HOTSPOT_PASS "bugquest-lora"
+
 /* WiFi : scan + connexion asynchrones. Les callbacks sont rappelés sur le thread UI. */
 typedef struct {
     char ssid[64];
