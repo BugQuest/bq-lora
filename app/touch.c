@@ -16,6 +16,11 @@ static bool pressed = false;
 static bool calib_mode = false;
 static bool have_cal = false;
 
+/* Lissage : moyenne glissante des derniers échantillons bruts (doigt = bruité). */
+#define AVG_N 6
+static int  hist_x[AVG_N], hist_y[AVG_N];
+static int  hist_n = 0, hist_pos = 0;
+
 /* sx = cx[0]*rx + cx[1]*ry + cx[2] ;  sy = cy[0]*rx + cy[1]*ry + cy[2] */
 static double cx[3] = {0, 0, 0};
 static double cy[3] = {0, 0, 0};
@@ -32,6 +37,24 @@ static void poll_dev(void)
             pressed = ev.value != 0;
         }
     }
+
+    if (pressed) {
+        hist_x[hist_pos] = raw_x;
+        hist_y[hist_pos] = raw_y;
+        hist_pos = (hist_pos + 1) % AVG_N;
+        if (hist_n < AVG_N) hist_n++;
+    } else {
+        hist_n = hist_pos = 0;
+    }
+}
+
+static void smoothed_raw(int *ax, int *ay)
+{
+    if (hist_n <= 0) { *ax = raw_x; *ay = raw_y; return; }
+    long sx = 0, sy = 0;
+    for (int i = 0; i < hist_n; i++) { sx += hist_x[i]; sy += hist_y[i]; }
+    *ax = (int)(sx / hist_n);
+    *ay = (int)(sy / hist_n);
 }
 
 bool touch_raw(int *rx, int *ry)
@@ -47,8 +70,10 @@ static void read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     LV_UNUSED(indev);
     poll_dev();
 
-    double x = cx[0] * raw_x + cx[1] * raw_y + cx[2];
-    double y = cy[0] * raw_x + cy[1] * raw_y + cy[2];
+    int ax, ay;
+    smoothed_raw(&ax, &ay);
+    double x = cx[0] * ax + cx[1] * ay + cx[2];
+    double y = cy[0] * ax + cy[1] * ay + cy[2];
     int sx = (int)(x + 0.5), sy = (int)(y + 0.5);
     if (sx < 0) sx = 0; else if (sx >= SCR_W) sx = SCR_W - 1;
     if (sy < 0) sy = 0; else if (sy >= SCR_H) sy = SCR_H - 1;
