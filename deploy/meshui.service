@@ -1,0 +1,28 @@
+[Unit]
+Description=Meshtastic command screen (LVGL UI)
+# Pas de dependance a un target graphique (OS Lite, rendu framebuffer direct).
+# L'ordonnancement repose sur l'attente de /dev/fb0 ci-dessous.
+
+[Service]
+Type=simple
+User=bq-lora
+WorkingDirectory=/home/bq-lora/meshui
+
+# Detache la console framebuffer (vtcon1) -> ecran 100% propre, sans texte ni curseur.
+# Le prefixe "+" force l'execution en root meme si le service tourne en bq-lora.
+ExecStartPre=+/bin/sh -c 'echo 0 > /sys/class/vtconsole/vtcon1/bind || true'
+# Attend que le framebuffer SPI soit pret.
+ExecStartPre=/bin/sh -c 'until [ -e /dev/fb0 ]; do sleep 0.2; done'
+
+ExecStart=/home/bq-lora/meshui/build/meshui
+
+Restart=on-failure
+RestartSec=2
+
+# Silence total (dont le warning cosmetique FBIOBLANK).
+# Pour debugguer, remplacer par StandardError=journal.
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target
