@@ -1,5 +1,7 @@
 #include "lvgl/lvgl.h"
 #include "ui.h"
+#include "touch.h"
+#include "calib.h"
 #include <unistd.h>
 #include <time.h>
 #include <stdint.h>
@@ -19,14 +21,14 @@ int main(void)
     lv_display_t *disp = lv_linux_fbdev_create();
     lv_linux_fbdev_set_file(disp, "/dev/fb0");
 
-    /* Tactile ADS7846 via evdev. Les coords sont des valeurs ADC brutes :
-     * calibration approximative à affiner (voir docs). */
-    lv_indev_t *touch = lv_evdev_create(LV_INDEV_TYPE_POINTER, "/dev/input/event0");
-    if (touch) {
-        lv_evdev_set_calibration(touch, 300, 300, 3800, 3800);
-    }
+    /* Pilote tactile maison (lecture brute + affine). */
+    touch_init();
 
     ui_init();
+
+    /* Premier démarrage sans calibration -> calibrage 5 points automatique. */
+    if (!touch_have_cal())
+        calib_start(NULL);
 
     while (1) {
         uint32_t idle = lv_timer_handler();

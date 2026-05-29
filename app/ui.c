@@ -2,6 +2,7 @@
 #include "ui.h"
 #include "theme.h"
 #include "mesh.h"
+#include "calib.h"
 #include <stdio.h>
 #include <stdint.h>
 
@@ -306,6 +307,11 @@ static void stat_card(lv_obj_t *parent, const char *k, const char *v, uint32_t c
     lv_obj_set_style_pad_top(vl, 16, 0);
 }
 
+static void calib_cb(lv_event_t *e) {
+    (void)e;
+    calib_start(NULL);
+}
+
 static void build_sys(void) {
     const mesh_self_t *s = mesh_self();
     lv_obj_t *grid = lv_obj_create(content);
@@ -326,6 +332,19 @@ static void build_sys(void) {
     stat_card(grid, "PRESET", s->preset, CY_MAGENTA);
     snprintf(b, sizeof(b), "%d", s->nodes);         stat_card(grid, "NOEUDS", b, CY_CYAN);
     stat_card(grid, "UPTIME", s->uptime, CY_CYAN);
+
+    lv_obj_t *cal = lv_button_create(grid);
+    lv_obj_set_width(cal, LV_PCT(100));
+    lv_obj_set_height(cal, 34);
+    lv_obj_set_style_radius(cal, 2, 0);
+    lv_obj_set_style_bg_opa(cal, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(cal, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(cal, 1, 0);
+    lv_obj_set_style_border_color(cal, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_shadow_width(cal, 0, 0);
+    lv_obj_add_event_cb(cal, calib_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cl = label(cal, LV_SYMBOL_GPS "  CALIBRER L'ECRAN", FONT_BODY, CY_TEXT);
+    lv_obj_center(cl);
 }
 
 /* ---------------------------------------------------------------- routage */
