@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 /* ---------------------------------------------------------------- état */
 static lv_obj_t *content;          /* zone centrale, reconstruite par onglet */
@@ -44,8 +45,37 @@ static lv_obj_t *label(lv_obj_t *parent, const char *txt, const lv_font_t *font,
 }
 
 /* ---------------------------------------------------------------- barre haute */
+static lv_obj_t *tb_clock, *tb_usb, *tb_wifi;
+static lv_timer_t *tb_timer;
+
+static int read_int_file(const char *p) {
+    FILE *f = fopen(p, "r"); if (!f) return 0;
+    int v = 0; fscanf(f, "%d", &v); fclose(f); return v;
+}
+
+static void topbar_refresh(lv_timer_t *t) {
+    (void)t;
+    if (!tb_clock) return;
+    time_t now; time(&now);
+    struct tm tm; localtime_r(&now, &tm);
+    char b[16]; snprintf(b, sizeof(b), "%02d:%02d", tm.tm_hour, tm.tm_min);
+    lv_label_set_text(tb_clock, b);
+
+    bool usb_up = read_int_file("/sys/class/net/usb0/carrier") == 1;
+    if (usb_up) lv_obj_clear_flag(tb_usb, LV_OBJ_FLAG_HIDDEN);
+    else        lv_obj_add_flag(tb_usb, LV_OBJ_FLAG_HIDDEN);
+
+    bool wifi_up = read_int_file("/sys/class/net/wlan0/carrier") == 1;
+    if (wifi_up) {
+        lv_obj_clear_flag(tb_wifi, LV_OBJ_FLAG_HIDDEN);
+        bool ap = sys_hotspot_active();
+        lv_obj_set_style_text_color(tb_wifi, lv_color_hex(ap ? CY_MAGENTA : CY_CYAN), 0);
+    } else {
+        lv_obj_add_flag(tb_wifi, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void build_topbar(lv_obj_t *parent) {
-    const mesh_self_t *s = mesh_self();
     lv_obj_t *bar = lv_obj_create(parent);
     lv_obj_set_size(bar, LV_PCT(100), 26);
     flat(bar);
@@ -61,10 +91,21 @@ static void build_topbar(lv_obj_t *parent) {
     lv_obj_t *name = label(bar, "NODE-7F3A", FONT_MONO, CY_CYAN);
     lv_obj_align(name, LV_ALIGN_LEFT_MID, 0, 0);
 
-    char buf[64];
-    snprintf(buf, sizeof(buf), LV_SYMBOL_GPS "  " LV_SYMBOL_WIFI "  " LV_SYMBOL_CHARGE " %d%%", s->batt);
-    lv_obj_t *info = label(bar, buf, FONT_SMALL, CY_TEXT);
-    lv_obj_align(info, LV_ALIGN_RIGHT_MID, 0, 0);
+    /* cluster d'icônes + horloge à droite */
+    lv_obj_t *right = lv_obj_create(bar);
+    lv_obj_set_size(right, LV_SIZE_CONTENT, LV_PCT(100));
+    flat(right);
+    lv_obj_set_flex_flow(right, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(right, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(right, 8, 0);
+    lv_obj_align(right, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_clear_flag(right, LV_OBJ_FLAG_SCROLLABLE);
+
+    tb_usb = label(right, LV_SYMBOL_USB, FONT_SMALL, CY_CYAN);
+    lv_obj_add_flag(tb_usb, LV_OBJ_FLAG_HIDDEN);
+    tb_wifi = label(right, LV_SYMBOL_WIFI, FONT_SMALL, CY_CYAN);
+    lv_obj_add_flag(tb_wifi, LV_OBJ_FLAG_HIDDEN);
+    tb_clock = label(right, "--:--", FONT_MONO, CY_TEXT);
 }
 
 /* ---------------------------------------------------------------- nav basse */
@@ -302,6 +343,7 @@ static lv_obj_t *sys_lbl_cpu, *sys_lbl_mem, *sys_lbl_disk, *sys_lbl_thr, *sys_lb
 static lv_obj_t *sys_lbl_ssh_state, *sys_lbl_ssh_btn, *sys_btn_ssh;
 static lv_obj_t *sys_lbl_wifi;
 static lv_obj_t *sys_lbl_hot_state, *sys_lbl_hot_btn;
+static lv_obj_t *sys_lbl_usb_state, *sys_lbl_usb_ip;
 static lv_timer_t *sys_refresh_timer;
 
 static lv_obj_t *info_row(lv_obj_t *parent, const char *key) {
@@ -403,6 +445,14 @@ static void sys_refresh(lv_timer_t *t) {
             lv_color_hex(hot ? CY_GREEN : CY_DIM), 0);
         lv_label_set_text(sys_lbl_hot_btn, hot ? "DESACTIVER" : "ACTIVER");
     }
+
+    if (sys_lbl_usb_state) {
+        bool usb_up = read_int_file("/sys/class/net/usb0/carrier") == 1;
+        lv_label_set_text(sys_lbl_usb_state, usb_up ? "connecte" : "deconnecte");
+        lv_obj_set_style_text_color(sys_lbl_usb_state,
+            lv_color_hex(usb_up ? CY_GREEN : CY_DIM), 0);
+        lv_label_set_text(sys_lbl_usb_ip, i.ip_usb);
+    }
 }
 
 static void build_sys(void) {
@@ -491,6 +541,12 @@ static void build_sys(void) {
     lv_obj_center(sys_lbl_hot_btn);
     lv_obj_t *credline = label(s, "SSID: " HOTSPOT_SSID "   pass: " HOTSPOT_PASS, FONT_SMALL, CY_DIM);
     (void)credline;
+
+    s = section(col, "USB");
+    sys_lbl_usb_state = info_row(s, "etat");
+    sys_lbl_usb_ip    = info_row(s, "ip Pi");
+    lv_obj_t *usbhint = label(s, "Brancher PC sur le port USB (milieu) du Pi", FONT_SMALL, CY_DIM);
+    (void)usbhint;
 
     s = section(col, "APPLICATION");
     small_button(s, LV_SYMBOL_REFRESH "  RELANCER MESHUI", CY_CYAN, restart_app_cb);
@@ -793,6 +849,8 @@ void ui_init(void) {
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
     build_topbar(scr);
+    topbar_refresh(NULL);
+    tb_timer = lv_timer_create(topbar_refresh, 5000, NULL);
 
     content = lv_obj_create(scr);
     lv_obj_set_width(content, LV_PCT(100));
