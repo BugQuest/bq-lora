@@ -1,0 +1,12 @@
+[Unit]
+Description=USB gadget (CDC NCM via configfs)
+After=systemd-modules-load.service local-fs.target
+Before=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/meshui-usb-gadget
+
+[Install]
+WantedBy=multi-user.target

@@ -44,6 +44,13 @@ install -m 755 "$SRC/deploy/meshui-ctl"      /usr/local/sbin/meshui-ctl
 install -m 440 -o root -g root "$SRC/deploy/meshui-sudoers" /etc/sudoers.d/meshui
 visudo -c -f /etc/sudoers.d/meshui
 
+# Gadget USB CDC NCM (compatible Windows 11) via configfs au boot
+install -m 755 "$SRC/deploy/usb-ncm-setup.sh" /usr/local/sbin/meshui-usb-gadget
+install -m 644 "$SRC/deploy/usb-gadget.service" /etc/systemd/system/usb-gadget.service
+# Retirer g_ether de cmdline.txt (legacy, en conflit avec le gadget configfs)
+sed -i 's/modules-load=dwc2,g_ether/modules-load=dwc2/' /boot/firmware/cmdline.txt || true
+systemctl enable usb-gadget.service || true
+
 # Services systemd
 install -m 644 "$SRC/deploy/meshui.service" /etc/systemd/system/meshui.service
 install -m 644 "$SRC/deploy/meshui-splash.service" /etc/systemd/system/meshui-splash.service
