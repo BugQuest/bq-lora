@@ -49,7 +49,15 @@ install -m 755 "$SRC/deploy/usb-ncm-setup.sh" /usr/local/sbin/meshui-usb-gadget
 install -m 644 "$SRC/deploy/usb-gadget.service" /etc/systemd/system/usb-gadget.service
 # Retirer g_ether de cmdline.txt (legacy, en conflit avec le gadget configfs)
 sed -i 's/modules-load=dwc2,g_ether/modules-load=dwc2/' /boot/firmware/cmdline.txt || true
+# Bascule directe sur NCM des le premier boot (sinon il faudrait un reboot)
+modprobe -r g_ether 2>/dev/null || true
 systemctl enable usb-gadget.service || true
+systemctl start  usb-gadget.service || true
+# Profil NM "shared" pour usb0 (DHCP du Pi vers le PC)
+nmcli connection show usb0 >/dev/null 2>&1 || \
+    nmcli connection add type ethernet ifname usb0 con-name usb0 \
+        ipv4.method shared ipv6.method ignore autoconnect yes
+nmcli connection up usb0 2>/dev/null || true
 
 # Services systemd
 install -m 644 "$SRC/deploy/meshui.service" /etc/systemd/system/meshui.service
