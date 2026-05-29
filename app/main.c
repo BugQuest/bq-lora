@@ -13,6 +13,13 @@ static uint32_t tick_cb(void)
     return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
 }
 
+/* Après le splash : calibrage 5 points si jamais calibré. */
+static void after_splash(void)
+{
+    if (!touch_have_cal())
+        calib_start(NULL);
+}
+
 int main(void)
 {
     lv_init();
@@ -25,10 +32,7 @@ int main(void)
     touch_init();
 
     ui_init();
-
-    /* Premier démarrage sans calibration -> calibrage 5 points automatique. */
-    if (!touch_have_cal())
-        calib_start(NULL);
+    ui_show_splash(after_splash);
 
     while (1) {
         uint32_t idle = lv_timer_handler();

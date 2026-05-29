@@ -1,0 +1,17 @@
+[Unit]
+Description=Boot splash sur l'ecran SPI (avant meshui)
+DefaultDependencies=no
+After=local-fs.target
+Before=meshui.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Attend le framebuffer SPI
+ExecStartPre=/bin/sh -c 'until [ -e /dev/fb0 ]; do sleep 0.1; done'
+# Detache la console tot -> pas de texte de boot sur l'ecran
+ExecStartPre=/bin/sh -c 'echo 0 > /sys/class/vtconsole/vtcon1/bind || true'
+ExecStart=/usr/bin/python3 /home/bq-lora/meshui/tools/splash.py
+
+[Install]
+WantedBy=sysinit.target

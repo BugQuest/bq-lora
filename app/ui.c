@@ -357,6 +357,61 @@ static void show_tab(int tab) {
     refresh_nav();
 }
 
+/* ---------------------------------------------------------------- splash */
+static lv_obj_t *splash_ov;
+static void (*splash_done)(void);
+
+static void bar_anim_cb(void *bar, int32_t v) {
+    lv_bar_set_value((lv_obj_t *)bar, v, LV_ANIM_OFF);
+}
+
+static void splash_close(lv_timer_t *t) {
+    lv_timer_delete(t);
+    lv_obj_delete(splash_ov);
+    splash_ov = NULL;
+    if (splash_done) splash_done();
+}
+
+void ui_show_splash(void (*done)(void)) {
+    splash_done = done;
+
+    splash_ov = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(splash_ov, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(splash_ov, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_bg_opa(splash_ov, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(splash_ov, 0, 0);
+    lv_obj_set_style_radius(splash_ov, 0, 0);
+    lv_obj_clear_flag(splash_ov, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = label(splash_ov, "MESH//OS", &lv_font_montserrat_28, CY_CYAN);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, -44);
+
+    lv_obj_t *sub = label(splash_ov, "node // NODE-7F3A", FONT_SMALL, CY_MAGENTA);
+    lv_obj_align(sub, LV_ALIGN_CENTER, 0, -10);
+
+    lv_obj_t *bar = lv_bar_create(splash_ov);
+    lv_obj_set_size(bar, 180, 4);
+    lv_obj_align(bar, LV_ALIGN_CENTER, 0, 28);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(CY_PANEL2), LV_PART_MAIN);
+    lv_obj_set_style_radius(bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(CY_CYAN), LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar, 0, LV_PART_INDICATOR);
+    lv_bar_set_range(bar, 0, 100);
+
+    lv_obj_t *foot = label(splash_ov, "INITIALISATION...", FONT_SMALL, CY_DIM);
+    lv_obj_align(foot, LV_ALIGN_BOTTOM_MID, 0, -24);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, bar);
+    lv_anim_set_exec_cb(&a, bar_anim_cb);
+    lv_anim_set_values(&a, 0, 100);
+    lv_anim_set_duration(&a, 1500);
+    lv_anim_start(&a);
+
+    lv_timer_create(splash_close, 1800, NULL);
+}
+
 /* ---------------------------------------------------------------- init */
 void ui_init(void) {
     lv_obj_t *scr = lv_screen_active();
