@@ -125,8 +125,9 @@ void sys_info_get(sys_info_t *o)
 }
 
 /* ---------- actions ---------- */
-void sys_reboot(void)   { system(CTL " reboot &"); }
-void sys_shutdown(void) { system(CTL " poweroff &"); }
+void sys_reboot(void)      { system(CTL " reboot &"); }
+void sys_shutdown(void)    { system(CTL " poweroff &"); }
+void sys_restart_app(void) { system(CTL " restart-meshui &"); }
 
 bool sys_ssh_enabled(void)
 {

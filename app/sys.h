@@ -23,6 +23,7 @@ void sys_info_get(sys_info_t *out);
 /* Actions privilégiées — passent par /usr/local/sbin/meshui-ctl (sudo NOPASSWD). */
 void sys_reboot(void);
 void sys_shutdown(void);
+void sys_restart_app(void);    /* systemctl restart meshui */
 bool sys_ssh_enabled(void);
 bool sys_ssh_running(void);
 void sys_ssh_set(bool on);

@@ -17,6 +17,9 @@ case "$1" in
         systemctl stop ssh
         systemctl disable ssh
         ;;
+    restart-meshui)
+        exec systemctl restart meshui
+        ;;
     wifi-scan)
         exec /usr/bin/nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list --rescan yes
         ;;

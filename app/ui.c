@@ -345,10 +345,12 @@ static lv_obj_t *small_button(lv_obj_t *parent, const char *txt, uint32_t color,
 }
 
 static void confirm_dialog(const char *msg, void (*on_yes)(void));
-static void reboot_yes(void)   { sys_reboot(); }
-static void shutdown_yes(void) { sys_shutdown(); }
-static void reboot_cb(lv_event_t *e)   { (void)e; confirm_dialog("Redemarrer ?", reboot_yes); }
-static void shutdown_cb(lv_event_t *e) { (void)e; confirm_dialog("Eteindre ?",    shutdown_yes); }
+static void reboot_yes(void)      { sys_reboot(); }
+static void shutdown_yes(void)    { sys_shutdown(); }
+static void restart_app_yes(void) { sys_restart_app(); }
+static void reboot_cb(lv_event_t *e)      { (void)e; confirm_dialog("Redemarrer le Pi ?", reboot_yes); }
+static void shutdown_cb(lv_event_t *e)    { (void)e; confirm_dialog("Eteindre le Pi ?",    shutdown_yes); }
+static void restart_app_cb(lv_event_t *e) { (void)e; confirm_dialog("Relancer meshui ?",   restart_app_yes); }
 static void calib_cb(lv_event_t *e)    { (void)e; calib_start(NULL); }
 static void ssh_toggle_cb(lv_event_t *e) { (void)e; sys_ssh_set(!sys_ssh_running()); }
 static void wifi_modal_open(void);
@@ -450,6 +452,9 @@ static void build_sys(void) {
     lv_obj_add_event_cb(wbtn, wifi_btn_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *wl = label(wbtn, LV_SYMBOL_WIFI "  RESEAUX", FONT_SMALL, CY_TEXT);
     lv_obj_center(wl);
+
+    s = section(col, "APPLICATION");
+    small_button(s, LV_SYMBOL_REFRESH "  RELANCER MESHUI", CY_CYAN, restart_app_cb);
 
     s = section(col, "ECRAN");
     small_button(s, LV_SYMBOL_GPS "  CALIBRER L'ECRAN", CY_CYAN, calib_cb);
@@ -759,8 +764,8 @@ void ui_init(void) {
 
     build_nav(scr);
 
-    /* clavier overlay, masqué par défaut */
-    kb = lv_keyboard_create(scr);
+    /* clavier overlay sur le top layer : visible au-dessus de tout (chat + modaux) */
+    kb = lv_keyboard_create(lv_layer_top());
     lv_obj_set_size(kb, LV_PCT(100), LV_PCT(55));
     lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
