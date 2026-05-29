@@ -53,6 +53,23 @@ static int read_int_file(const char *p) {
     int v = 0; fscanf(f, "%d", &v); fclose(f); return v;
 }
 
+/* Le carrier du gadget g_ether reste a 1 meme cable debranche.
+ * Indicateur fiable : un client a-t-il un bail DHCP actif sur usb0, ou un
+ * voisin ARP sur l'interface ? */
+static bool usb_client_connected(void) {
+    FILE *f = fopen("/var/lib/NetworkManager/dnsmasq-usb0.leases", "r");
+    if (f) {
+        int c = fgetc(f); fclose(f);
+        if (c != EOF) return true;
+    }
+    FILE *p = popen("ip neigh show dev usb0 2>/dev/null", "r");
+    if (p) {
+        int c = fgetc(p); pclose(p);
+        if (c != EOF) return true;
+    }
+    return false;
+}
+
 static void topbar_refresh(lv_timer_t *t) {
     (void)t;
     if (!tb_clock) return;
@@ -61,7 +78,7 @@ static void topbar_refresh(lv_timer_t *t) {
     char b[16]; snprintf(b, sizeof(b), "%02d:%02d", tm.tm_hour, tm.tm_min);
     lv_label_set_text(tb_clock, b);
 
-    bool usb_up = read_int_file("/sys/class/net/usb0/carrier") == 1;
+    bool usb_up = usb_client_connected();
     if (usb_up) lv_obj_clear_flag(tb_usb, LV_OBJ_FLAG_HIDDEN);
     else        lv_obj_add_flag(tb_usb, LV_OBJ_FLAG_HIDDEN);
 
@@ -447,7 +464,7 @@ static void sys_refresh(lv_timer_t *t) {
     }
 
     if (sys_lbl_usb_state) {
-        bool usb_up = read_int_file("/sys/class/net/usb0/carrier") == 1;
+        bool usb_up = usb_client_connected();
         lv_label_set_text(sys_lbl_usb_state, usb_up ? "connecte" : "deconnecte");
         lv_obj_set_style_text_color(sys_lbl_usb_state,
             lv_color_hex(usb_up ? CY_GREEN : CY_DIM), 0);
