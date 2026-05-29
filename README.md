@@ -24,25 +24,48 @@ framebuffer (`/dev/fb0`), sans serveur graphique (OS en version *Lite*).
 
 ### Câblage (bus matériel SPI0)
 
-Les labels « SPI1 » de l'écran correspondent en réalité au **SPI0** du Pi.
+Les labels « SPI1 » sérigraphiés sur l'écran correspondent en réalité au
+**SPI0** du Pi (GPIO 7/8/9/10/11). Branchement groupé par connecteur de l'écran.
 
-| Signal écran | GPIO Pi | Rôle              |
-|--------------|---------|-------------------|
-| spi1_cs      | 8       | CE0 → écran (`spi0.0`) |
-| touch_cs     | 7       | CE1 → tactile (`spi0.1`) |
-| spi1_sck     | 11      | SCLK              |
-| spi1_mosi    | 10      | MOSI              |
-| spi1_miso    | 9       | MISO              |
-| spi1_rs      | 24      | DC (data/command) |
-| tft_reset    | 25      | Reset écran       |
-| touch_int    | 5       | PENIRQ tactile    |
-| tft_blk      | 18      | Rétroéclairage    |
-| beeper       | 17      | Buzzer            |
-| board_5v     | 5V      | Alimentation      |
-| gnd          | GND     | Masse             |
+**EXP1 :**
 
-> ⚠️ Alimentation 5V mais **logique 3.3V**. Vérifier que les lignes qui
-> reviennent vers le Pi (MISO/GPIO9 et INT/GPIO5) ne dépassent pas 3.3V.
+| Signal écran | GPIO Pi | Broche physique | Rôle |
+|--------------|---------|-----------------|------|
+| spi1_cs   | GPIO8  | 24 | CE0 → écran (`spi0.0`) |
+| touch_cs  | GPIO7  | 26 | CE1 → tactile (`spi0.1`) |
+| spi1_rs   | GPIO24 | 18 | DC (data/command) |
+| tft_reset | GPIO25 | 22 | Reset écran |
+| touch_int | GPIO5  | 29 | PENIRQ tactile |
+| tft_blk   | GPIO18 | 12 | Rétroéclairage (BLK) |
+| beeper    | GPIO17 | 11 | Buzzer |
+| board_5v  | 5V     | 2 (ou 4) | Alimentation écran |
+| gnd       | GND    | 6 (ou 9/14/20/25/30/34/39) | Masse |
+
+**EXP2 :**
+
+| Signal écran | GPIO Pi | Broche physique | Rôle |
+|--------------|---------|-----------------|------|
+| spi1_sck  | GPIO11 | 23 | SCLK |
+| spi1_mosi | GPIO10 | 19 | MOSI |
+| spi1_miso | GPIO9  | 21 | MISO |
+
+> ⚠️ **Alimentation 5V mais logique 3.3V.** Vérifier que les lignes qui
+> reviennent vers le Pi (`spi1_miso`/GPIO9 et `touch_int`/GPIO5) ne dépassent
+> pas 3.3V.
+>
+> ⚠️ **Fiabilité des contacts tactiles.** `touch_int` (GPIO5) et `spi1_miso`
+> (GPIO9) sont les deux lignes critiques du tactile — l'écran (write-only) ne se
+> sert jamais du MISO, donc un MISO mal connecté donne « IRQ OK mais aucun
+> point ». Sur fils dupont, ces contacts lâchent facilement à la manipulation :
+> les fiabiliser (soudure / nappe / colle chaude) évite les rechutes.
+
+### Accès SSH par USB (gadget ethernet)
+
+En plus du WiFi, le Pi est configuré en **gadget USB ethernet** (`dwc2` +
+`g_ether`) : relier le **port USB *data*** du Pi (micro-USB du milieu, marqué
+`USB`, pas `PWR IN`) à un port USB du PC donne un accès `ssh bqlora` filaire,
+indépendant du WiFi. Alimenter le Pi par le port `PWR IN` en parallèle pour
+éviter tout manque de courant.
 
 ---
 
