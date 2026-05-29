@@ -1,0 +1,16 @@
+# LVGL cloné séparément sur le Pi (voir README)
+app/lvgl/
+
+# Artefacts de build
+build/
+*.o
+*.so
+*.a
+meshui
+
+# lv_conf.h généré depuis le template (voir docs/lv_conf.md)
+app/lv_conf.h
+
+# Divers OS
+.DS_Store
+Thumbs.db

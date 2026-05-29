@@ -1,0 +1,14 @@
+# Lignes à ajouter à la fin de /boot/firmware/config.txt sur le Raspberry Pi
+# Écran MKS TS35-R V2.0 (ILI9488) + tactile XPT2046 sur bus SPI0
+#
+# Note : les labels "SPI1" sérigraphiés sur l'écran correspondent en réalité
+# au bus matériel SPI0 du Pi (GPIO 7/8/9/10/11).
+
+dtparam=spi=on
+
+# Afficheur ILI9488 piloté via le driver fbtft ili9486 (compatible, validé).
+# led_pin=18 = rétroéclairage (BLK) — INDISPENSABLE, sinon écran noir.
+dtoverlay=fbtft,spi0-0,ili9486,reset_pin=25,dc_pin=24,led_pin=18,rotate=270,speed=24000000,bgr=1,fps=30
+
+# Tactile résistif XPT2046 -> driver ads7846 ; CS=CE1 (GPIO7), IRQ=GPIO5
+dtoverlay=ads7846,cs=1,penirq=5,penirq_pull=2,speed=2000000,xohms=150,swapxy=1
