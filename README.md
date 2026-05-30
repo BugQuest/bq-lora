@@ -27,6 +27,12 @@ framebuffer (`/dev/fb0`), sans serveur graphique (OS en version *Lite*).
 Les labels « SPI1 » sérigraphiés sur l'écran correspondent en réalité au
 **SPI0** du Pi (GPIO 7/8/9/10/11). Branchement groupé par connecteur de l'écran.
 
+![Brochage et câblage écran ↔ Raspberry Pi Zero 2 W](pinout.png)
+
+Le schéma ci-dessus reprend le sens de branchement EXP1/EXP2 et les numéros
+de broche physique du GPIO Pi correspondants ; les tableaux qui suivent
+listent chaque signal avec sa GPIO logique et son rôle.
+
 **EXP1 :**
 
 | Signal écran | GPIO Pi | Broche physique | Rôle |
