@@ -10,6 +10,8 @@
 #include <string.h>
 #include <time.h>
 #include <dirent.h>
+#include <sys/stat.h>
+#include <stdlib.h>
 
 /* ---------------------------------------------------------------- état */
 /* IDs d'app (cur_tab garde son nom mais sémantique = app courante) */
@@ -516,18 +518,118 @@ static void bad_run_open(const char *path, const char *name) {
     sys_badusb_run_async(path, bad_run_done_cb, NULL);
 }
 
-typedef struct { char path[256]; char name[64]; } badusb_entry_t;
-static badusb_entry_t bad_entries[16];
+typedef struct { char path[256]; char name[64]; bool is_dir; } badusb_entry_t;
+static badusb_entry_t bad_entries[32];
 static int bad_entries_n = 0;
+static char bap_cwd[256] = BADUSB_DIR;     /* dossier courant dans l'explorateur */
+static lv_obj_t *bap_list_obj, *bap_lbl_path;
 
-static void bad_run_cb(lv_event_t *e) {
+static int bap_entry_cmp(const void *a, const void *b) {
+    const badusb_entry_t *ea = a, *eb = b;
+    if (ea->is_dir != eb->is_dir) return eb->is_dir - ea->is_dir;  /* dossiers d'abord */
+    return strcmp(ea->name, eb->name);
+}
+static void bap_refresh_list(void);
+
+static void bap_parent_cb(lv_event_t *e) {
+    (void)e;
+    if (strcmp(bap_cwd, BADUSB_DIR) == 0) return;
+    char *p = strrchr(bap_cwd, '/');
+    if (p && p > bap_cwd) *p = 0;
+    /* securite : ne pas sortir de BADUSB_DIR */
+    if (strncmp(bap_cwd, BADUSB_DIR, strlen(BADUSB_DIR)) != 0)
+        strcpy(bap_cwd, BADUSB_DIR);
+    bap_refresh_list();
+}
+
+static void bap_entry_cb(lv_event_t *e) {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     if (idx < 0 || idx >= bad_entries_n) return;
-    if (sys_usb_mode() != USB_MODE_HID) {
-        confirm_dialog("Active d'abord le mode CLAVIER\n(BAD USB)", NULL);
+    badusb_entry_t *en = &bad_entries[idx];
+    if (en->is_dir) {
+        strncpy(bap_cwd, en->path, sizeof(bap_cwd) - 1);
+        bap_cwd[sizeof(bap_cwd) - 1] = 0;
+        bap_refresh_list();
         return;
     }
-    bad_run_open(bad_entries[idx].path, bad_entries[idx].name);
+    if (sys_usb_mode() != USB_MODE_HID) {
+        confirm_dialog("Active d'abord le mode CLAVIER", NULL);
+        return;
+    }
+    bad_run_open(en->path, en->name);
+}
+
+static void bap_refresh_list(void) {
+    if (!bap_list_obj) return;
+    lv_obj_clean(bap_list_obj);
+    bad_entries_n = 0;
+    DIR *d = opendir(bap_cwd);
+    if (d) {
+        struct dirent *de;
+        while ((de = readdir(d)) && bad_entries_n < (int)(sizeof(bad_entries)/sizeof(bad_entries[0]))) {
+            if (de->d_name[0] == '.') continue;
+            badusb_entry_t *e = &bad_entries[bad_entries_n];
+            snprintf(e->path, sizeof(e->path), "%s/%s", bap_cwd, de->d_name);
+            strncpy(e->name, de->d_name, sizeof(e->name) - 1);
+            e->name[sizeof(e->name) - 1] = 0;
+            struct stat st;
+            e->is_dir = (stat(e->path, &st) == 0 && S_ISDIR(st.st_mode));
+            bad_entries_n++;
+        }
+        closedir(d);
+    }
+    qsort(bad_entries, bad_entries_n, sizeof(badusb_entry_t), bap_entry_cmp);
+
+    /* Affiche le chemin relatif dans le label en tete */
+    if (bap_lbl_path) {
+        const char *rel = bap_cwd + strlen(BADUSB_DIR);
+        if (!*rel) rel = "/";
+        char buf[80]; snprintf(buf, sizeof(buf), "%s", rel);
+        lv_label_set_text(bap_lbl_path, buf);
+    }
+
+    /* Ligne ".." pour remonter si on n'est pas a la racine */
+    if (strcmp(bap_cwd, BADUSB_DIR) != 0) {
+        lv_obj_t *up = lv_button_create(bap_list_obj);
+        lv_obj_set_size(up, LV_PCT(100), 32);
+        lv_obj_set_style_radius(up, 2, 0);
+        lv_obj_set_style_bg_opa(up, LV_OPA_20, 0);
+        lv_obj_set_style_bg_color(up, lv_color_hex(CY_DIM), 0);
+        lv_obj_set_style_border_width(up, 1, 0);
+        lv_obj_set_style_border_color(up, lv_color_hex(CY_DIM), 0);
+        lv_obj_set_style_shadow_width(up, 0, 0);
+        lv_obj_add_event_cb(up, bap_parent_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_t *ul = label(up, LV_SYMBOL_LEFT "  ..", FONT_BODY, CY_TEXT);
+        lv_obj_align(ul, LV_ALIGN_LEFT_MID, 8, 0);
+    }
+
+    if (bad_entries_n == 0 && strcmp(bap_cwd, BADUSB_DIR) == 0) {
+        label(bap_list_obj, "(dossier vide)", FONT_SMALL, CY_DIM);
+        return;
+    }
+    for (int i = 0; i < bad_entries_n; i++) {
+        badusb_entry_t *en = &bad_entries[i];
+        lv_obj_t *r = lv_button_create(bap_list_obj);
+        lv_obj_set_size(r, LV_PCT(100), 32);
+        lv_obj_set_style_radius(r, 2, 0);
+        lv_obj_set_style_bg_opa(r, LV_OPA_20, 0);
+        uint32_t col = en->is_dir ? CY_AMBER : CY_MAGENTA;
+        lv_obj_set_style_bg_color(r, lv_color_hex(col), 0);
+        lv_obj_set_style_border_width(r, 1, 0);
+        lv_obj_set_style_border_color(r, lv_color_hex(col), 0);
+        lv_obj_set_style_shadow_width(r, 0, 0);
+        lv_obj_add_event_cb(r, bap_entry_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        char txt[96];
+        snprintf(txt, sizeof(txt), "%s  %s",
+                 en->is_dir ? LV_SYMBOL_DIRECTORY : LV_SYMBOL_FILE,
+                 en->name);
+        lv_obj_t *rl = label(r, txt, FONT_BODY, CY_TEXT);
+        lv_obj_align(rl, LV_ALIGN_LEFT_MID, 8, 0);
+        if (!en->is_dir) {
+            lv_obj_t *rr = label(r, "RUN", FONT_SMALL, CY_TEXT);
+            lv_obj_align(rr, LV_ALIGN_RIGHT_MID, -8, 0);
+        }
+    }
 }
 
 static int usb_mode_target;
@@ -1106,6 +1208,7 @@ static void show_tab(int app) {
     hap_lbl_state = NULL; hap_lbl_btn = NULL;
     bap_lbl_state = NULL; bap_lbl_btn = NULL;
     bap_btn_ncm = NULL; bap_btn_hid = NULL; bap_btn_storage = NULL;
+    bap_list_obj = NULL; bap_lbl_path = NULL;
     sys_log_ta = NULL;
     sys_bl_slider = NULL; sys_bl_lbl = NULL;
     compose_ta   = NULL;
@@ -1302,44 +1405,23 @@ static void build_badusb_app(void) {
     bap_btn_hid     = small_button(mr, "CLAVIER",  CY_MAGENTA, usb_mode_btn_hid_cb);
     bap_btn_storage = small_button(mr, "STOCKAGE", CY_AMBER,   usb_mode_btn_storage_cb);
 
-    /* liste scripts */
-    bad_entries_n = 0;
-    DIR *bd = opendir(BADUSB_DIR);
-    if (bd) {
-        struct dirent *de;
-        while ((de = readdir(bd)) && bad_entries_n < (int)(sizeof(bad_entries)/sizeof(bad_entries[0]))) {
-            if (de->d_name[0] == '.') continue;
-            badusb_entry_t *e = &bad_entries[bad_entries_n];
-            snprintf(e->path, sizeof(e->path), BADUSB_DIR "/%s", de->d_name);
-            strncpy(e->name, de->d_name, sizeof(e->name) - 1);
-            e->name[sizeof(e->name) - 1] = 0;
-            bad_entries_n++;
-        }
-        closedir(bd);
-    }
-    if (bad_entries_n == 0) {
-        label(col, "(aucun script dans " BADUSB_DIR ")", FONT_SMALL, CY_DIM);
-    } else {
-        for (int i = 0; i < bad_entries_n; i++) {
-            lv_obj_t *rr = lv_obj_create(col);
-            lv_obj_set_size(rr, LV_PCT(100), LV_SIZE_CONTENT);
-            flat(rr); lv_obj_set_flex_flow(rr, LV_FLEX_FLOW_ROW);
-            lv_obj_set_flex_align(rr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-            lv_obj_clear_flag(rr, LV_OBJ_FLAG_SCROLLABLE);
-            label(rr, bad_entries[i].name, FONT_BODY, CY_TEXT);
-            lv_obj_t *rb = lv_button_create(rr);
-            lv_obj_set_size(rb, 80, 28);
-            lv_obj_set_style_radius(rb, 2, 0);
-            lv_obj_set_style_bg_opa(rb, LV_OPA_30, 0);
-            lv_obj_set_style_bg_color(rb, lv_color_hex(CY_MAGENTA), 0);
-            lv_obj_set_style_border_width(rb, 1, 0);
-            lv_obj_set_style_border_color(rb, lv_color_hex(CY_MAGENTA), 0);
-            lv_obj_set_style_shadow_width(rb, 0, 0);
-            lv_obj_add_event_cb(rb, bad_run_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-            lv_obj_t *rl = label(rb, "RUN", FONT_SMALL, CY_TEXT);
-            lv_obj_center(rl);
-        }
-    }
+    /* explorateur de l'arbo BADUSB */
+    label(col, "scripts", FONT_SMALL, CY_DIM);
+    bap_lbl_path = label(col, "/", FONT_MONO, CY_AMBER);
+    lv_obj_set_width(bap_lbl_path, LV_PCT(100));
+    lv_label_set_long_mode(bap_lbl_path, LV_LABEL_LONG_DOT);
+
+    bap_list_obj = lv_obj_create(col);
+    lv_obj_set_size(bap_list_obj, LV_PCT(100), LV_PCT(100));
+    flat(bap_list_obj);
+    lv_obj_set_flex_flow(bap_list_obj, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(bap_list_obj, 4, 0);
+    lv_obj_set_scroll_dir(bap_list_obj, LV_DIR_VER);
+
+    /* on revient toujours a la racine quand on rouvre l'app */
+    strcpy(bap_cwd, BADUSB_DIR);
+    bap_refresh_list();
+
     bap_refresh(NULL);
     sys_refresh_timer = lv_timer_create(bap_refresh, 3000, NULL);
 }
