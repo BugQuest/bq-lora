@@ -134,6 +134,8 @@ static void build_topbar(lv_obj_t *parent) {
     lv_obj_add_flag(tb_back, LV_OBJ_FLAG_HIDDEN);
 
     tb_name = label(bar, settings_node_name(), FONT_MONO, CY_CYAN);
+    lv_obj_set_width(tb_name, 175);     /* borne pour ne pas chevaucher le cluster droit */
+    lv_label_set_long_mode(tb_name, LV_LABEL_LONG_DOT);
     lv_obj_align(tb_name, LV_ALIGN_LEFT_MID, 40, 0);
 
     /* cluster d'icônes + horloge à droite */
@@ -707,11 +709,13 @@ static void sys_refresh(lv_timer_t *t) {
         lv_color_hex(running ? CY_GREEN : CY_DIM), 0);
     lv_label_set_text(sys_lbl_ssh_btn, running ? "DESACTIVER" : "ACTIVER");
 
-    if (i.wifi_signal >= 0)
-        snprintf(b, sizeof(b), "%s  (%d%%)", i.wifi_ssid, i.wifi_signal);
-    else
-        snprintf(b, sizeof(b), "%s", i.wifi_ssid);
-    lv_label_set_text(sys_lbl_wifi, b);
+    if (sys_lbl_wifi) {
+        if (i.wifi_signal >= 0)
+            snprintf(b, sizeof(b), "%s  (%d%%)", i.wifi_ssid, i.wifi_signal);
+        else
+            snprintf(b, sizeof(b), "%s", i.wifi_ssid);
+        lv_label_set_text(sys_lbl_wifi, b);
+    }
 
     if (sys_lbl_wifi_radio_state) {
         bool radio = sys_wifi_radio_on();
@@ -1076,7 +1080,19 @@ static void build_badusb_app(void);
 
 static void show_tab(int app) {
     if (sys_refresh_timer) { lv_timer_delete(sys_refresh_timer); sys_refresh_timer = NULL; }
+    /* null tous les pointeurs vers des labels qu'on s'apprete a liberer */
     sys_lbl_host = NULL;
+    sys_lbl_wifi = NULL;
+    sys_lbl_wifi_radio_state = NULL; sys_lbl_wifi_radio_btn = NULL;
+    sys_lbl_hot_state = NULL; sys_lbl_hot_btn = NULL;
+    sys_lbl_usb_mode_state = NULL; sys_lbl_usb_mode_btn = NULL;
+    sys_lbl_usb_state = NULL; sys_lbl_usb_ip = NULL;
+    sys_lbl_bt_state = NULL; sys_lbl_bt_btn = NULL;
+    sys_lbl_ssh_state = NULL; sys_lbl_ssh_btn = NULL;
+    hap_lbl_state = NULL; hap_lbl_btn = NULL;
+    bap_lbl_state = NULL; bap_lbl_btn = NULL;
+    sys_log_ta = NULL;
+    sys_bl_slider = NULL; sys_bl_lbl = NULL;
     compose_ta   = NULL;
     cur_tab = app;
     lv_obj_clean(content);
@@ -1221,7 +1237,12 @@ static void build_hotspot_app(void) {
                                 settings_hotspot_ssid(), settings_hotspot_pass());
     label(col, credbuf, FONT_BODY, CY_TEXT);
 
-    small_button(col, LV_SYMBOL_IMAGE "  QR CODE WIFI", CY_MAGENTA, hap_qr_cb);
+    /* small_button utilise flex_grow=1 (utile en ROW), ici en COLUMN il s'etire :
+     * on retire le grow et on borne la hauteur */
+    lv_obj_t *qrb = small_button(col, LV_SYMBOL_IMAGE "  QR CODE WIFI", CY_MAGENTA, hap_qr_cb);
+    lv_obj_set_flex_grow(qrb, 0);
+    lv_obj_set_height(qrb, 38);
+    lv_obj_set_width(qrb, LV_PCT(100));
 
     /* refresh */
     hap_refresh(NULL);
