@@ -207,26 +207,31 @@ usb_mode_t sys_usb_mode(void)
 {
     if (access("/sys/kernel/config/usb_gadget/bqlora/functions/hid.usb0", F_OK) == 0)
         return USB_MODE_HID;
+    if (access("/sys/kernel/config/usb_gadget/bqlora/functions/mass_storage.usb0", F_OK) == 0)
+        return USB_MODE_STORAGE;
     if (access("/sys/kernel/config/usb_gadget/bqlora/functions/ncm.usb0", F_OK) == 0)
         return USB_MODE_NCM;
     return USB_MODE_UNKNOWN;
 }
 
-typedef struct { usb_mode_cb_t cb; void *user; bool hid; bool ok; } mode_ctx_t;
-static void mode_deliver(void *a) { mode_ctx_t *c = a; c->cb(c->ok, c->user); free(c); }
+typedef struct { usb_mode_cb_t cb; void *user; usb_mode_t mode; bool ok; } mode_ctx_t;
+static void mode_deliver(void *a) { mode_ctx_t *c = a; if (c->cb) c->cb(c->ok, c->user); free(c); }
 static void *mode_thread(void *a)
 {
     mode_ctx_t *c = a;
+    const char *sub = "usb-ncm";
+    if      (c->mode == USB_MODE_HID)     sub = "usb-hid";
+    else if (c->mode == USB_MODE_STORAGE) sub = "usb-storage";
     char cmd[128];
-    snprintf(cmd, sizeof(cmd), CTL " %s", c->hid ? "usb-hid" : "usb-ncm");
+    snprintf(cmd, sizeof(cmd), CTL " %s", sub);
     c->ok = (system(cmd) == 0);
     lv_async_call(mode_deliver, c);
     return NULL;
 }
-void sys_usb_mode_set_async(bool hid, usb_mode_cb_t cb, void *user)
+void sys_usb_mode_set_async(usb_mode_t mode, usb_mode_cb_t cb, void *user)
 {
     mode_ctx_t *c = calloc(1, sizeof(*c));
-    c->cb = cb; c->user = user; c->hid = hid;
+    c->cb = cb; c->user = user; c->mode = mode;
     pthread_t t; pthread_create(&t, NULL, mode_thread, c); pthread_detach(t);
 }
 

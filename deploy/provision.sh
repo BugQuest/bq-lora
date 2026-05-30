@@ -14,7 +14,7 @@ echo "=== provision $(date) ==="
 # Dépendances (filet : cloud-init peut planter sur des 404 de mirroir)
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y || true
-apt-get install -y build-essential cmake git python3-pil python3-gpiozero
+apt-get install -y build-essential cmake git python3-pil python3-gpiozero dosfstools
 
 # LVGL (v9.2)
 if [ ! -d "$H/lvgl" ]; then
@@ -52,9 +52,32 @@ systemctl enable backlight.service || true
 systemctl start  backlight.service || true
 
 # Gadget USB CDC NCM (compatible Windows 11) via configfs au boot
-install -m 755 "$SRC/deploy/usb-ncm-setup.sh" /usr/local/sbin/meshui-usb-gadget
-install -m 755 "$SRC/deploy/usb-hid-setup.sh" /usr/local/sbin/meshui-usb-hid
-install -m 644 "$SRC/deploy/usb-gadget.service" /etc/systemd/system/usb-gadget.service
+install -m 755 "$SRC/deploy/usb-ncm-setup.sh"     /usr/local/sbin/meshui-usb-gadget
+install -m 755 "$SRC/deploy/usb-hid-setup.sh"     /usr/local/sbin/meshui-usb-hid
+install -m 755 "$SRC/deploy/usb-storage-setup.sh" /usr/local/sbin/meshui-usb-storage
+install -m 644 "$SRC/deploy/usb-gadget.service"   /etc/systemd/system/usb-gadget.service
+
+# Image FAT pour le mode STORAGE (depot de scripts BadUSB depuis le PC)
+IMG="$H/meshui/badusb.img"
+MNT="$H/meshui/badusb"
+TMP="/tmp/meshui-badusb-seed"
+mkdir -p "$TMP"
+if [ -d "$MNT" ] && ! mountpoint -q "$MNT"; then
+    cp -r "$MNT"/* "$TMP/" 2>/dev/null || true
+fi
+if [ ! -f "$IMG" ]; then
+    dd if=/dev/zero of="$IMG" bs=1M count=16 status=none
+    mkfs.vfat -F 16 -n BADUSB "$IMG" >/dev/null
+    chown $U:$U "$IMG"
+fi
+mkdir -p "$MNT"
+chown $U:$U "$MNT"
+mountpoint -q "$MNT" || mount -o loop,umask=000 "$IMG" "$MNT"
+# Seed avec les exemples si l'image est vide
+if [ -z "$(ls -A "$MNT" 2>/dev/null)" ] && [ -d "$TMP" ]; then
+    cp -r "$TMP"/* "$MNT/" 2>/dev/null || true
+fi
+rm -rf "$TMP"
 # Retirer g_ether de cmdline.txt (legacy, en conflit avec le gadget configfs)
 sed -i 's/modules-load=dwc2,g_ether/modules-load=dwc2/' /boot/firmware/cmdline.txt || true
 # Bascule directe sur NCM des le premier boot (sinon il faudrait un reboot)

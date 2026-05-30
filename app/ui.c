@@ -353,6 +353,7 @@ static lv_obj_t *sys_lbl_bt_state, *sys_lbl_bt_btn;
 static lv_obj_t *sys_lbl_usb_mode_state, *sys_lbl_usb_mode_btn;
 static lv_obj_t *hap_lbl_state, *hap_lbl_btn;     /* app HOTSPOT */
 static lv_obj_t *bap_lbl_state, *bap_lbl_btn;     /* app BAD USB */
+static lv_obj_t *bap_btn_ncm, *bap_btn_hid, *bap_btn_storage; /* selecteur 3 modes */
 static lv_obj_t *sys_log_ta;
 static lv_obj_t *sys_bl_slider, *sys_bl_lbl;
 static lv_timer_t *sys_refresh_timer;
@@ -529,17 +530,28 @@ static void bad_run_cb(lv_event_t *e) {
     bad_run_open(bad_entries[idx].path, bad_entries[idx].name);
 }
 
+static int usb_mode_target;
 static void usb_mode_switch_done(bool ok, void *user) { (void)ok; (void)user; }
 static void usb_mode_yes(void) {
-    bool to_hid = (sys_usb_mode() != USB_MODE_HID);
-    sys_usb_mode_set_async(to_hid, usb_mode_switch_done, NULL);
+    sys_usb_mode_set_async((usb_mode_t)usb_mode_target, usb_mode_switch_done, NULL);
 }
-static void usb_mode_toggle_cb(lv_event_t *e) {
+static void usb_mode_btn_ncm_cb(lv_event_t *e) {
     (void)e;
-    if (sys_usb_mode() == USB_MODE_HID)
-        confirm_dialog("Retour mode RESEAU ?\n(restaure SSH USB)", usb_mode_yes);
-    else
-        confirm_dialog("Passer en mode CLAVIER ?\n(coupe SSH USB)", usb_mode_yes);
+    if (sys_usb_mode() == USB_MODE_NCM) return;
+    usb_mode_target = USB_MODE_NCM;
+    confirm_dialog("Mode RESEAU ?\n(restaure SSH USB)", usb_mode_yes);
+}
+static void usb_mode_btn_hid_cb(lv_event_t *e) {
+    (void)e;
+    if (sys_usb_mode() == USB_MODE_HID) return;
+    usb_mode_target = USB_MODE_HID;
+    confirm_dialog("Mode CLAVIER ?\n(coupe SSH USB)", usb_mode_yes);
+}
+static void usb_mode_btn_storage_cb(lv_event_t *e) {
+    (void)e;
+    if (sys_usb_mode() == USB_MODE_STORAGE) return;
+    usb_mode_target = USB_MODE_STORAGE;
+    confirm_dialog("Mode STOCKAGE ?\n(expose le dossier badusb\nau PC, coupe SSH USB)", usb_mode_yes);
 }
 static void beep_cb(lv_event_t *e) { (void)e; sys_beep(1500, 120); }
 
@@ -1093,6 +1105,7 @@ static void show_tab(int app) {
     sys_lbl_ssh_state = NULL; sys_lbl_ssh_btn = NULL;
     hap_lbl_state = NULL; hap_lbl_btn = NULL;
     bap_lbl_state = NULL; bap_lbl_btn = NULL;
+    bap_btn_ncm = NULL; bap_btn_hid = NULL; bap_btn_storage = NULL;
     sys_log_ta = NULL;
     sys_bl_slider = NULL; sys_bl_lbl = NULL;
     compose_ta   = NULL;
@@ -1249,11 +1262,21 @@ static void bap_refresh(lv_timer_t *t) {
     (void)t;
     if (!bap_lbl_state) return;
     usb_mode_t m = sys_usb_mode();
-    const char *s = (m == USB_MODE_HID) ? "CLAVIER" : (m == USB_MODE_NCM) ? "RESEAU" : "?";
+    const char *s = (m == USB_MODE_HID)     ? "CLAVIER actif"
+                  : (m == USB_MODE_STORAGE) ? "STOCKAGE actif"
+                  : (m == USB_MODE_NCM)     ? "RESEAU actif"  : "?";
+    uint32_t col = (m == USB_MODE_HID)     ? CY_MAGENTA
+                 : (m == USB_MODE_STORAGE) ? CY_AMBER
+                 : (m == USB_MODE_NCM)     ? CY_CYAN  : CY_DIM;
     lv_label_set_text(bap_lbl_state, s);
-    lv_obj_set_style_text_color(bap_lbl_state,
-        lv_color_hex(m == USB_MODE_HID ? CY_MAGENTA : CY_CYAN), 0);
-    lv_label_set_text(bap_lbl_btn, m == USB_MODE_HID ? "MODE RESEAU" : "MODE CLAVIER");
+    lv_obj_set_style_text_color(bap_lbl_state, lv_color_hex(col), 0);
+
+    if (bap_btn_ncm)
+        lv_obj_set_style_bg_opa(bap_btn_ncm,     m == USB_MODE_NCM     ? LV_OPA_80 : LV_OPA_20, 0);
+    if (bap_btn_hid)
+        lv_obj_set_style_bg_opa(bap_btn_hid,     m == USB_MODE_HID     ? LV_OPA_80 : LV_OPA_20, 0);
+    if (bap_btn_storage)
+        lv_obj_set_style_bg_opa(bap_btn_storage, m == USB_MODE_STORAGE ? LV_OPA_80 : LV_OPA_20, 0);
 }
 
 static void build_badusb_app(void) {
@@ -1267,23 +1290,17 @@ static void build_badusb_app(void) {
 
     label(col, "BAD USB", FONT_BIG, CY_MAGENTA);
 
-    lv_obj_t *r = lv_obj_create(col);
-    lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
-    flat(r); lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
-    bap_lbl_state = label(r, "?", FONT_BODY, CY_DIM);
-    lv_obj_t *btn = lv_button_create(r);
-    lv_obj_set_size(btn, 150, 32);
-    lv_obj_set_style_radius(btn, 2, 0);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_30, 0);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(CY_MAGENTA), 0);
-    lv_obj_set_style_border_width(btn, 1, 0);
-    lv_obj_set_style_border_color(btn, lv_color_hex(CY_MAGENTA), 0);
-    lv_obj_set_style_shadow_width(btn, 0, 0);
-    lv_obj_add_event_cb(btn, usb_mode_toggle_cb, LV_EVENT_CLICKED, NULL);
-    bap_lbl_btn = label(btn, "?", FONT_SMALL, CY_TEXT);
-    lv_obj_center(bap_lbl_btn);
+    bap_lbl_state = label(col, "?", FONT_BODY, CY_DIM);
+
+    /* sélecteur 3 modes USB */
+    lv_obj_t *mr = lv_obj_create(col);
+    lv_obj_set_size(mr, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(mr); lv_obj_set_flex_flow(mr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(mr, 4, 0);
+    lv_obj_clear_flag(mr, LV_OBJ_FLAG_SCROLLABLE);
+    bap_btn_ncm     = small_button(mr, "RESEAU",   CY_CYAN,    usb_mode_btn_ncm_cb);
+    bap_btn_hid     = small_button(mr, "CLAVIER",  CY_MAGENTA, usb_mode_btn_hid_cb);
+    bap_btn_storage = small_button(mr, "STOCKAGE", CY_AMBER,   usb_mode_btn_storage_cb);
 
     /* liste scripts */
     bad_entries_n = 0;
