@@ -108,7 +108,7 @@ static void topbar_refresh(lv_timer_t *t) {
 
 static void build_topbar(lv_obj_t *parent) {
     lv_obj_t *bar = lv_obj_create(parent);
-    lv_obj_set_size(bar, LV_PCT(100), 26);
+    lv_obj_set_size(bar, LV_PCT(100), 32);
     flat(bar);
     lv_obj_set_style_bg_color(bar, lv_color_hex(CY_PANEL), 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
@@ -1156,18 +1156,13 @@ static void build_home(void) {
     lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_all(col, 6, 0);
 
-    /* baniere */
-    lv_obj_t *banner = label(col, "// CYBERDECK //", FONT_MONO, CY_MAGENTA);
-    lv_obj_align(banner, LV_ALIGN_TOP_MID, 0, 4);
-
-    /* grille 2 col x 3 lignes */
+    /* grille 2 col x 3 lignes — pleine hauteur disponible */
     lv_obj_t *grid = lv_obj_create(col);
     lv_obj_set_size(grid, LV_PCT(100), LV_PCT(100));
     flat(grid);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_top(grid, 30, 0);
-    lv_obj_set_style_pad_row(grid, 8, 0);
+    lv_obj_set_style_pad_row(grid, 10, 0);
     lv_obj_set_style_pad_column(grid, 8, 0);
     lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -1175,7 +1170,7 @@ static void build_home(void) {
     for (int i = 0; i < n; i++) {
         const app_card_t *a = &HOME_APPS[i];
         lv_obj_t *c = lv_button_create(grid);
-        lv_obj_set_size(c, LV_PCT(48), 115);
+        lv_obj_set_size(c, LV_PCT(48), 130);
         lv_obj_set_style_radius(c, 2, 0);
         lv_obj_set_style_bg_color(c, lv_color_hex(CY_PANEL), 0);
         lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
