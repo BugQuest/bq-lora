@@ -203,6 +203,54 @@ void sys_bt_set(bool on)
     system(cmd);
 }
 
+usb_mode_t sys_usb_mode(void)
+{
+    if (access("/sys/kernel/config/usb_gadget/bqlora/functions/hid.usb0", F_OK) == 0)
+        return USB_MODE_HID;
+    if (access("/sys/kernel/config/usb_gadget/bqlora/functions/ncm.usb0", F_OK) == 0)
+        return USB_MODE_NCM;
+    return USB_MODE_UNKNOWN;
+}
+
+typedef struct { usb_mode_cb_t cb; void *user; bool hid; bool ok; } mode_ctx_t;
+static void mode_deliver(void *a) { mode_ctx_t *c = a; c->cb(c->ok, c->user); free(c); }
+static void *mode_thread(void *a)
+{
+    mode_ctx_t *c = a;
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), CTL " %s", c->hid ? "usb-hid" : "usb-ncm");
+    c->ok = (system(cmd) == 0);
+    lv_async_call(mode_deliver, c);
+    return NULL;
+}
+void sys_usb_mode_set_async(bool hid, usb_mode_cb_t cb, void *user)
+{
+    mode_ctx_t *c = calloc(1, sizeof(*c));
+    c->cb = cb; c->user = user; c->hid = hid;
+    pthread_t t; pthread_create(&t, NULL, mode_thread, c); pthread_detach(t);
+}
+
+typedef struct { badusb_cb_t cb; void *user; char path[256]; bool ok; } bu_ctx_t;
+static void bu_deliver(void *a) { bu_ctx_t *c = a; c->cb(c->ok, c->user); free(c); }
+static void *bu_thread(void *a)
+{
+    bu_ctx_t *c = a;
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "/usr/bin/python3 /home/bq-lora/meshui/tools/badusb.py '%s' >/dev/null 2>&1",
+             c->path);
+    c->ok = (system(cmd) == 0);
+    lv_async_call(bu_deliver, c);
+    return NULL;
+}
+void sys_badusb_run_async(const char *path, badusb_cb_t cb, void *user)
+{
+    bu_ctx_t *c = calloc(1, sizeof(*c));
+    c->cb = cb; c->user = user;
+    strncpy(c->path, path, sizeof(c->path) - 1);
+    pthread_t t; pthread_create(&t, NULL, bu_thread, c); pthread_detach(t);
+}
+
 #define PWM_DUTY   "/sys/class/pwm/pwmchip0/pwm0/duty_cycle"
 #define PWM_PERIOD 1000000
 

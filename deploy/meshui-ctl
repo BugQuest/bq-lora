@@ -49,6 +49,12 @@ case "$1" in
     bt-off)
         exec /usr/sbin/rfkill block bluetooth
         ;;
+    usb-hid)
+        exec /usr/local/sbin/meshui-usb-hid
+        ;;
+    usb-ncm)
+        exec /usr/local/sbin/meshui-usb-gadget
+        ;;
     wifi-scan)
         exec /usr/bin/nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list --rescan yes
         ;;

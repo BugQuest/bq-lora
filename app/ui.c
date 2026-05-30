@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <dirent.h>
 
 /* ---------------------------------------------------------------- état */
 static lv_obj_t *content;          /* zone centrale, reconstruite par onglet */
@@ -369,6 +370,7 @@ static lv_obj_t *sys_lbl_hot_state, *sys_lbl_hot_btn;
 static lv_obj_t *sys_lbl_usb_state, *sys_lbl_usb_ip;
 static lv_obj_t *sys_lbl_wifi_radio_state, *sys_lbl_wifi_radio_btn;
 static lv_obj_t *sys_lbl_bt_state, *sys_lbl_bt_btn;
+static lv_obj_t *sys_lbl_usb_mode_state, *sys_lbl_usb_mode_btn;
 static lv_obj_t *sys_log_ta;
 static lv_obj_t *sys_bl_slider, *sys_bl_lbl;
 static lv_timer_t *sys_refresh_timer;
@@ -437,6 +439,126 @@ static void wifi_radio_toggle_cb(lv_event_t *e) {
 
 static void bt_yes(void) { sys_bt_set(!sys_bt_on()); }
 static void bt_toggle_cb(lv_event_t *e) { (void)e; bt_yes(); }
+
+/* ----- BAD USB ----- */
+#define BADUSB_DIR "/home/bq-lora/meshui/badusb"
+static lv_obj_t *bad_run_ov, *bad_run_skull, *bad_run_status;
+static lv_timer_t *bad_run_timer;
+static int bad_run_frame;
+static bool bad_run_active;
+
+static const char *SKULL_FRAME_A =
+"    .-=-.\n"
+"   /     \\\n"
+"  | O   O |\n"
+"  |   v   |\n"
+"   \\ === /\n"
+"    '---'\n"
+"    /   \\\n"
+"   /  X  \\\n"
+"  /   X   \\";
+static const char *SKULL_FRAME_B =
+"    .-=-.\n"
+"   /     \\\n"
+"  | -   - |\n"
+"  |   v   |\n"
+"   \\ === /\n"
+"    '---'\n"
+"    /   \\\n"
+"   /  X  \\\n"
+"  /   X   \\";
+
+static void bad_run_tick(lv_timer_t *t) {
+    (void)t;
+    if (!bad_run_skull) return;
+    bad_run_frame ^= 1;
+    lv_label_set_text(bad_run_skull, bad_run_frame ? SKULL_FRAME_A : SKULL_FRAME_B);
+    lv_obj_set_style_text_color(bad_run_skull,
+        lv_color_hex(bad_run_frame ? CY_MAGENTA : CY_CYAN), 0);
+}
+
+static void bad_run_close_e(lv_event_t *e) {
+    (void)e;
+    if (bad_run_timer) { lv_timer_delete(bad_run_timer); bad_run_timer = NULL; }
+    if (bad_run_ov)    { lv_obj_delete(bad_run_ov);     bad_run_ov = NULL; }
+    bad_run_active = false;
+}
+static void bad_run_auto_close(lv_timer_t *t) { lv_timer_delete(t); bad_run_close_e(NULL); }
+
+static void bad_run_done_cb(bool ok, void *user) {
+    (void)user;
+    if (!bad_run_status) return;
+    lv_label_set_text(bad_run_status, ok ? "  TERMINE  " : "  ECHEC  ");
+    lv_obj_set_style_text_color(bad_run_status,
+        lv_color_hex(ok ? CY_GREEN : CY_MAGENTA), 0);
+    if (bad_run_timer) { lv_timer_delete(bad_run_timer); bad_run_timer = NULL; }
+    lv_timer_create(bad_run_auto_close, 1500, NULL);
+}
+
+static void bad_run_open(const char *path, const char *name) {
+    if (bad_run_active) return;
+    bad_run_active = true;
+    bad_run_frame = 0;
+    bad_run_ov = lv_obj_create(lv_layer_top());
+    lv_obj_set_pos(bad_run_ov, 0, 0);
+    lv_obj_set_size(bad_run_ov, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(bad_run_ov, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_bg_opa(bad_run_ov, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(bad_run_ov, 0, 0);
+    lv_obj_set_style_radius(bad_run_ov, 0, 0);
+    lv_obj_set_style_pad_all(bad_run_ov, 0, 0);
+    lv_obj_clear_flag(bad_run_ov, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *h = label(bad_run_ov, "// BAD USB //", FONT_MONO, CY_MAGENTA);
+    lv_obj_align(h, LV_ALIGN_TOP_MID, 0, 10);
+
+    bad_run_skull = label(bad_run_ov, SKULL_FRAME_A, FONT_MONO, CY_MAGENTA);
+    lv_obj_set_style_text_line_space(bad_run_skull, 2, 0);
+    lv_obj_align(bad_run_skull, LV_ALIGN_CENTER, 0, -20);
+
+    char nb[80]; snprintf(nb, sizeof(nb), "exec : %s", name);
+    lv_obj_t *nm = label(bad_run_ov, nb, FONT_SMALL, CY_DIM);
+    lv_obj_align(nm, LV_ALIGN_BOTTOM_MID, 0, -70);
+
+    bad_run_status = label(bad_run_ov, "  EN COURS...  ", FONT_BODY, CY_CYAN);
+    lv_obj_align(bad_run_status, LV_ALIGN_BOTTOM_MID, 0, -40);
+
+    lv_obj_t *bar = lv_obj_create(bad_run_ov);
+    lv_obj_set_size(bar, LV_PCT(100), 38);
+    flat(bar); lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(bar, LV_SYMBOL_CLOSE "  FERMER", CY_DIM, bad_run_close_e);
+
+    bad_run_timer = lv_timer_create(bad_run_tick, 350, NULL);
+    sys_badusb_run_async(path, bad_run_done_cb, NULL);
+}
+
+typedef struct { char path[256]; char name[64]; } badusb_entry_t;
+static badusb_entry_t bad_entries[16];
+static int bad_entries_n = 0;
+
+static void bad_run_cb(lv_event_t *e) {
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    if (idx < 0 || idx >= bad_entries_n) return;
+    if (sys_usb_mode() != USB_MODE_HID) {
+        confirm_dialog("Active d'abord le mode CLAVIER\n(BAD USB)", NULL);
+        return;
+    }
+    bad_run_open(bad_entries[idx].path, bad_entries[idx].name);
+}
+
+static void usb_mode_switch_done(bool ok, void *user) { (void)ok; (void)user; }
+static void usb_mode_yes(void) {
+    bool to_hid = (sys_usb_mode() != USB_MODE_HID);
+    sys_usb_mode_set_async(to_hid, usb_mode_switch_done, NULL);
+}
+static void usb_mode_toggle_cb(lv_event_t *e) {
+    (void)e;
+    if (sys_usb_mode() == USB_MODE_HID)
+        confirm_dialog("Retour mode RESEAU ?\n(restaure SSH USB)", usb_mode_yes);
+    else
+        confirm_dialog("Passer en mode CLAVIER ?\n(coupe SSH USB)", usb_mode_yes);
+}
 static void beep_cb(lv_event_t *e) { (void)e; sys_beep(1500, 120); }
 
 static void bl_slider_cb(lv_event_t *e) {
@@ -627,6 +749,16 @@ static void sys_refresh(lv_timer_t *t) {
             lv_color_hex(bt ? CY_GREEN : CY_DIM), 0);
         lv_label_set_text(sys_lbl_bt_btn, bt ? "DESACTIVER" : "ACTIVER");
     }
+    if (sys_lbl_usb_mode_state) {
+        usb_mode_t m = sys_usb_mode();
+        const char *txt = (m == USB_MODE_HID) ? "CLAVIER" :
+                          (m == USB_MODE_NCM) ? "RESEAU"  : "?";
+        lv_label_set_text(sys_lbl_usb_mode_state, txt);
+        lv_obj_set_style_text_color(sys_lbl_usb_mode_state,
+            lv_color_hex(m == USB_MODE_HID ? CY_MAGENTA : CY_CYAN), 0);
+        lv_label_set_text(sys_lbl_usb_mode_btn,
+            m == USB_MODE_HID ? "MODE RESEAU" : "MODE CLAVIER");
+    }
 
     if (sys_lbl_hot_state) {
         bool hot = sys_hotspot_active();
@@ -779,6 +911,65 @@ static void build_sys(void) {
     sys_lbl_usb_ip    = info_row(s, "ip Pi");
     lv_obj_t *usbhint = label(s, "Brancher PC sur le port USB (milieu) du Pi", FONT_SMALL, CY_DIM);
     (void)usbhint;
+
+    /* --- BAD USB --- */
+    s = section(col, "BAD USB");
+    lv_obj_t *rbu = lv_obj_create(s);
+    lv_obj_set_size(rbu, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(rbu); lv_obj_set_flex_flow(rbu, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(rbu, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(rbu, LV_OBJ_FLAG_SCROLLABLE);
+    sys_lbl_usb_mode_state = label(rbu, "?", FONT_BODY, CY_DIM);
+    lv_obj_t *mbtn = lv_button_create(rbu);
+    lv_obj_set_size(mbtn, 130, 30);
+    lv_obj_set_style_radius(mbtn, 2, 0);
+    lv_obj_set_style_bg_opa(mbtn, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(mbtn, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_border_width(mbtn, 1, 0);
+    lv_obj_set_style_border_color(mbtn, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_shadow_width(mbtn, 0, 0);
+    lv_obj_add_event_cb(mbtn, usb_mode_toggle_cb, LV_EVENT_CLICKED, NULL);
+    sys_lbl_usb_mode_btn = label(mbtn, "?", FONT_SMALL, CY_TEXT);
+    lv_obj_center(sys_lbl_usb_mode_btn);
+
+    /* liste les scripts ducky */
+    bad_entries_n = 0;
+    DIR *bd = opendir(BADUSB_DIR);
+    if (bd) {
+        struct dirent *de;
+        while ((de = readdir(bd)) && bad_entries_n < (int)(sizeof(bad_entries)/sizeof(bad_entries[0]))) {
+            if (de->d_name[0] == '.') continue;
+            badusb_entry_t *e = &bad_entries[bad_entries_n];
+            snprintf(e->path, sizeof(e->path), BADUSB_DIR "/%s", de->d_name);
+            strncpy(e->name, de->d_name, sizeof(e->name) - 1);
+            e->name[sizeof(e->name) - 1] = 0;
+            bad_entries_n++;
+        }
+        closedir(bd);
+    }
+    if (bad_entries_n == 0) {
+        label(s, "(aucun script dans " BADUSB_DIR ")", FONT_SMALL, CY_DIM);
+    } else {
+        for (int i = 0; i < bad_entries_n; i++) {
+            lv_obj_t *r = lv_obj_create(s);
+            lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
+            flat(r); lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+            label(r, bad_entries[i].name, FONT_SMALL, CY_TEXT);
+            lv_obj_t *rb = lv_button_create(r);
+            lv_obj_set_size(rb, 70, 26);
+            lv_obj_set_style_radius(rb, 2, 0);
+            lv_obj_set_style_bg_opa(rb, LV_OPA_30, 0);
+            lv_obj_set_style_bg_color(rb, lv_color_hex(CY_MAGENTA), 0);
+            lv_obj_set_style_border_width(rb, 1, 0);
+            lv_obj_set_style_border_color(rb, lv_color_hex(CY_MAGENTA), 0);
+            lv_obj_set_style_shadow_width(rb, 0, 0);
+            lv_obj_add_event_cb(rb, bad_run_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+            lv_obj_t *rl = label(rb, "RUN", FONT_SMALL, CY_TEXT);
+            lv_obj_center(rl);
+        }
+    }
 
     s = section(col, "REGLAGES");
     small_button(s, LV_SYMBOL_SETTINGS "  MODIFIER", CY_CYAN, settings_modal_open_e);

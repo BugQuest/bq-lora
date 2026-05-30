@@ -1,0 +1,12 @@
+# Ouvre PowerShell et liste utilisateur + reseau.
+DELAY 800
+GUI r
+DELAY 400
+STRING powershell
+ENTER
+DELAY 1200
+STRING whoami
+ENTER
+DELAY 300
+STRING ipconfig | findstr IPv4
+ENTER

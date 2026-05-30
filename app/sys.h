@@ -39,6 +39,17 @@ void sys_wifi_radio_set(bool on);
 bool sys_bt_on(void);
 void sys_bt_set(bool on);
 
+/* Mode du gadget USB (NCM = reseau, HID = clavier BadUSB). */
+typedef enum { USB_MODE_NCM, USB_MODE_HID, USB_MODE_UNKNOWN } usb_mode_t;
+usb_mode_t sys_usb_mode(void);
+
+typedef void (*usb_mode_cb_t)(bool ok, void *user);
+void sys_usb_mode_set_async(bool hid, usb_mode_cb_t cb, void *user);
+
+/* Lance un script BadUSB (ducky-like) via /dev/hidg0. */
+typedef void (*badusb_cb_t)(bool ok, void *user);
+void sys_badusb_run_async(const char *script_path, badusb_cb_t cb, void *user);
+
 /* Change le fuseau horaire systeme (timedatectl set-timezone). */
 void sys_set_timezone(const char *tz);
 

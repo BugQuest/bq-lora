@@ -1,0 +1,10 @@
+# Ouvre Notepad sous Windows et tape un message.
+DELAY 800
+GUI r
+DELAY 400
+STRING notepad
+ENTER
+DELAY 800
+STRING Bonjour depuis BugQuest // Lora
+ENTER
+STRING Pwned by USB en 3 secondes.

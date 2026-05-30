@@ -53,6 +53,7 @@ systemctl start  backlight.service || true
 
 # Gadget USB CDC NCM (compatible Windows 11) via configfs au boot
 install -m 755 "$SRC/deploy/usb-ncm-setup.sh" /usr/local/sbin/meshui-usb-gadget
+install -m 755 "$SRC/deploy/usb-hid-setup.sh" /usr/local/sbin/meshui-usb-hid
 install -m 644 "$SRC/deploy/usb-gadget.service" /etc/systemd/system/usb-gadget.service
 # Retirer g_ether de cmdline.txt (legacy, en conflit avec le gadget configfs)
 sed -i 's/modules-load=dwc2,g_ether/modules-load=dwc2/' /boot/firmware/cmdline.txt || true
