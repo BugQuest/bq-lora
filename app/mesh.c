@@ -1,4 +1,5 @@
 #include "mesh.h"
+#include "settings.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -60,7 +61,7 @@ void mesh_send(uint8_t ch, const char *text) {
     if (s_msg_count >= (int)(sizeof(s_msgs)/sizeof(s_msgs[0]))) return;
     mesh_message_t *m = &s_msgs[s_msg_count++];
     m->ch = ch;
-    m->from = "NODE-7F3A";
+    m->from = settings_node_name();
     strncpy(m->text, text, sizeof(m->text) - 1);
     m->text[sizeof(m->text) - 1] = '\0';
     m->time = "now";

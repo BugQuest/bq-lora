@@ -2,6 +2,7 @@
 #include "ui.h"
 #include "touch.h"
 #include "calib.h"
+#include "settings.h"
 #include <unistd.h>
 #include <time.h>
 #include <stdint.h>
@@ -22,6 +23,8 @@ static void after_splash(void)
 
 int main(void)
 {
+    settings_load();
+
     lv_init();
     lv_tick_set_cb(tick_cb);
 

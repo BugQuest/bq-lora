@@ -4,6 +4,7 @@
 #include "mesh.h"
 #include "calib.h"
 #include "sys.h"
+#include "settings.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -45,7 +46,7 @@ static lv_obj_t *label(lv_obj_t *parent, const char *txt, const lv_font_t *font,
 }
 
 /* ---------------------------------------------------------------- barre haute */
-static lv_obj_t *tb_clock, *tb_usb, *tb_wifi;
+static lv_obj_t *tb_clock, *tb_usb, *tb_wifi, *tb_name;
 static lv_timer_t *tb_timer;
 
 static int read_int_file(const char *p) {
@@ -73,6 +74,7 @@ static bool usb_client_connected(void) {
 static void topbar_refresh(lv_timer_t *t) {
     (void)t;
     if (!tb_clock) return;
+    if (tb_name) lv_label_set_text(tb_name, settings_node_name());
     time_t now; time(&now);
     struct tm tm; localtime_r(&now, &tm);
     char b[16]; snprintf(b, sizeof(b), "%02d:%02d", tm.tm_hour, tm.tm_min);
@@ -105,8 +107,8 @@ static void build_topbar(lv_obj_t *parent) {
     lv_obj_set_style_pad_right(bar, 8, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *name = label(bar, "NODE-7F3A", FONT_MONO, CY_CYAN);
-    lv_obj_align(name, LV_ALIGN_LEFT_MID, 0, 0);
+    tb_name = label(bar, settings_node_name(), FONT_MONO, CY_CYAN);
+    lv_obj_align(tb_name, LV_ALIGN_LEFT_MID, 0, 0);
 
     /* cluster d'icônes + horloge à droite */
     lv_obj_t *right = lv_obj_create(bar);
@@ -452,12 +454,14 @@ static void qr_open_cb(lv_event_t *e) {
     lv_obj_set_style_pad_all(qr_ov, 8, 0);
     lv_obj_clear_flag(qr_ov, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *t = label(qr_ov, "Scanner pour rejoindre " HOTSPOT_SSID, FONT_SMALL, CY_CYAN);
+    char hdr[96]; snprintf(hdr, sizeof(hdr), "Scanner pour rejoindre %s", settings_hotspot_ssid());
+    lv_obj_t *t = label(qr_ov, hdr, FONT_SMALL, CY_CYAN);
     lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 0);
 
     /* WIFI:T:WPA;S:<ssid>;P:<pass>;; */
     char payload[160];
-    snprintf(payload, sizeof(payload), "WIFI:T:WPA;S:%s;P:%s;;", HOTSPOT_SSID, HOTSPOT_PASS);
+    snprintf(payload, sizeof(payload), "WIFI:T:WPA;S:%s;P:%s;;",
+             settings_hotspot_ssid(), settings_hotspot_pass());
     lv_obj_t *qr = lv_qrcode_create(qr_ov);
     lv_qrcode_set_size(qr, 260);
     lv_qrcode_set_dark_color(qr, lv_color_hex(CY_CYAN));
@@ -465,7 +469,8 @@ static void qr_open_cb(lv_event_t *e) {
     lv_qrcode_update(qr, payload, (int32_t)strlen(payload));
     lv_obj_align(qr, LV_ALIGN_CENTER, 0, -10);
 
-    char cred[96]; snprintf(cred, sizeof(cred), "SSID  %s\npass  %s", HOTSPOT_SSID, HOTSPOT_PASS);
+    char cred[160]; snprintf(cred, sizeof(cred), "SSID  %s\npass  %s",
+                             settings_hotspot_ssid(), settings_hotspot_pass());
     lv_obj_t *c = label(qr_ov, cred, FONT_SMALL, CY_TEXT);
     lv_obj_align(c, LV_ALIGN_CENTER, 0, 140);
 
@@ -474,6 +479,81 @@ static void qr_open_cb(lv_event_t *e) {
     flat(bar); lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
     small_button(bar, LV_SYMBOL_CLOSE "  FERMER", CY_DIM, qr_close_cb);
+}
+
+/* ----- modal Reglages : node name, SSID/pass hotspot, fuseau ----- */
+static lv_obj_t *set_ov, *set_ta_node, *set_ta_ssid, *set_ta_pass, *set_ta_tz;
+
+static void set_ta_focus_e(lv_event_t *e) {
+    lv_obj_t *ta = lv_event_get_target_obj(e);
+    lv_keyboard_set_textarea(kb, ta);
+    lv_obj_clear_flag(kb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(kb);
+}
+
+static void set_modal_close(void) {
+    if (set_ov) { lv_obj_delete(set_ov); set_ov = NULL; }
+    lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void set_save_cb_e(lv_event_t *e) {
+    (void)e;
+    settings_set_node_name   (lv_textarea_get_text(set_ta_node));
+    settings_set_hotspot_ssid(lv_textarea_get_text(set_ta_ssid));
+    settings_set_hotspot_pass(lv_textarea_get_text(set_ta_pass));
+    const char *tz = lv_textarea_get_text(set_ta_tz);
+    settings_set_timezone(tz);
+    settings_save();
+    sys_set_timezone(tz);
+    set_modal_close();
+}
+static void set_cancel_cb_e(lv_event_t *e) { (void)e; set_modal_close(); }
+
+static lv_obj_t *settings_field(lv_obj_t *parent, const char *key, const char *val, bool pwd) {
+    label(parent, key, FONT_SMALL, CY_DIM);
+    lv_obj_t *ta = lv_textarea_create(parent);
+    lv_textarea_set_one_line(ta, true);
+    if (pwd) lv_textarea_set_password_mode(ta, true);
+    lv_textarea_set_text(ta, val);
+    lv_obj_set_size(ta, LV_PCT(100), 30);
+    lv_obj_set_style_bg_color(ta, lv_color_hex(CY_PANEL2), 0);
+    lv_obj_set_style_text_color(ta, lv_color_hex(CY_TEXT), 0);
+    lv_obj_set_style_text_font(ta, FONT_BODY, 0);
+    lv_obj_set_style_border_color(ta, lv_color_hex(CY_BORDER), 0);
+    lv_obj_set_style_border_width(ta, 1, 0);
+    lv_obj_set_style_radius(ta, 2, 0);
+    lv_obj_add_event_cb(ta, set_ta_focus_e, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(ta, set_ta_focus_e, LV_EVENT_FOCUSED, NULL);
+    return ta;
+}
+
+static void settings_modal_open_e(lv_event_t *e) {
+    (void)e;
+    set_ov = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(set_ov, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(set_ov, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_bg_opa(set_ov, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(set_ov, 0, 0);
+    lv_obj_set_style_radius(set_ov, 0, 0);
+    lv_obj_set_style_pad_all(set_ov, 8, 0);
+    lv_obj_clear_flag(set_ov, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(set_ov, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(set_ov, 4, 0);
+
+    label(set_ov, "Reglages", FONT_BIG, CY_CYAN);
+
+    set_ta_node = settings_field(set_ov, "nom du noeud",       settings_node_name(),    false);
+    set_ta_ssid = settings_field(set_ov, "SSID hotspot",       settings_hotspot_ssid(), false);
+    set_ta_pass = settings_field(set_ov, "passphrase hotspot", settings_hotspot_pass(), true);
+    set_ta_tz   = settings_field(set_ov, "fuseau horaire",     settings_timezone(),     false);
+
+    lv_obj_t *row = lv_obj_create(set_ov);
+    lv_obj_set_size(row, LV_PCT(100), 38);
+    flat(row); lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, 8, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(row, "ANNULER",     CY_DIM,  set_cancel_cb_e);
+    small_button(row, "ENREGISTRER", CY_CYAN, set_save_cb_e);
 }
 static void hot_toggle_cb(lv_event_t *e) {
     (void)e;
@@ -616,7 +696,9 @@ static void build_sys(void) {
     lv_obj_add_event_cb(hbtn, hot_toggle_cb, LV_EVENT_CLICKED, NULL);
     sys_lbl_hot_btn = label(hbtn, "?", FONT_SMALL, CY_TEXT);
     lv_obj_center(sys_lbl_hot_btn);
-    lv_obj_t *credline = label(s, "SSID: " HOTSPOT_SSID "   pass: " HOTSPOT_PASS, FONT_SMALL, CY_DIM);
+    char credbuf[160]; snprintf(credbuf, sizeof(credbuf), "SSID: %s   pass: %s",
+                                settings_hotspot_ssid(), settings_hotspot_pass());
+    lv_obj_t *credline = label(s, credbuf, FONT_SMALL, CY_DIM);
     (void)credline;
     small_button(s, LV_SYMBOL_IMAGE "  QR CODE WIFI", CY_MAGENTA, qr_open_cb);
 
@@ -625,6 +707,10 @@ static void build_sys(void) {
     sys_lbl_usb_ip    = info_row(s, "ip Pi");
     lv_obj_t *usbhint = label(s, "Brancher PC sur le port USB (milieu) du Pi", FONT_SMALL, CY_DIM);
     (void)usbhint;
+
+    s = section(col, "REGLAGES");
+    small_button(s, LV_SYMBOL_SETTINGS "  MODIFIER", CY_CYAN, settings_modal_open_e);
+    label(s, "noeud, SSID hotspot, passphrase, fuseau", FONT_SMALL, CY_DIM);
 
     s = section(col, "APPLICATION");
     small_button(s, LV_SYMBOL_REFRESH "  RELANCER MESHUI", CY_CYAN, restart_app_cb);
@@ -937,7 +1023,8 @@ void ui_show_splash(void (*done)(void)) {
     lv_obj_set_style_radius(divider, 0, 0);
     lv_obj_align(divider, LV_ALIGN_CENTER, 0, 8);
 
-    lv_obj_t *node = label(splash_ov, "node // NODE-7F3A", FONT_SMALL, CY_DIM);
+    char subbuf[80]; snprintf(subbuf, sizeof(subbuf), "node // %s", settings_node_name());
+    lv_obj_t *node = label(splash_ov, subbuf, FONT_SMALL, CY_DIM);
     lv_obj_align(node, LV_ALIGN_CENTER, 0, 22);
 
     lv_obj_t *bar = lv_bar_create(splash_ov);

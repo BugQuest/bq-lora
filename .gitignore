@@ -11,6 +11,10 @@ meshui
 # lv_conf.h généré depuis le template (voir docs/lv_conf.md)
 app/lv_conf.h
 
+# Réglages runtime (édités via l'UI)
+config.ini
+touch.cal
+
 # Divers OS
 .DS_Store
 Thumbs.db

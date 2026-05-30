@@ -30,6 +30,8 @@ void sys_ssh_set(bool on);
 
 bool sys_hotspot_active(void);
 void sys_hotspot_set(bool on);
+/* Change le fuseau horaire systeme (timedatectl set-timezone). */
+void sys_set_timezone(const char *tz);
 
 /* Rétroéclairage : pourcentage 0..100, lecture via /sys/class/pwm. */
 int  sys_backlight_get(void);
@@ -40,9 +42,6 @@ void sys_beep(int freq_hz, int duration_ms);
 
 /* Dernières lignes du journal système (journalctl -n N). */
 void sys_log_tail(char *out, int cap, int n_lines);
-/* SSID/passphrase utilisés par le hotspot (constantes affichées à l'écran). */
-#define HOTSPOT_SSID "BugQuest-Lora"
-#define HOTSPOT_PASS "bugquest-lora"
 
 /* WiFi : scan + connexion asynchrones. Les callbacks sont rappelés sur le thread UI. */
 typedef struct {

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "settings.h"
 #include "lvgl/lvgl.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -156,11 +157,20 @@ bool sys_hotspot_active(void)
 
 void sys_hotspot_set(bool on)
 {
-    char cmd[160];
+    char cmd[256];
     if (on)
-        snprintf(cmd, sizeof(cmd), CTL " hotspot-on '%s' '%s' &", HOTSPOT_SSID, HOTSPOT_PASS);
+        snprintf(cmd, sizeof(cmd), CTL " hotspot-on '%s' '%s' &",
+                 settings_hotspot_ssid(), settings_hotspot_pass());
     else
         snprintf(cmd, sizeof(cmd), CTL " hotspot-off &");
+    system(cmd);
+}
+
+void sys_set_timezone(const char *tz)
+{
+    if (!tz || !*tz) return;
+    char cmd[160];
+    snprintf(cmd, sizeof(cmd), CTL " timezone '%s' &", tz);
     system(cmd);
 }
 
