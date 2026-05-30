@@ -12,6 +12,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <stdlib.h>
+#include <strings.h>
 
 /* ---------------------------------------------------------------- état */
 /* IDs d'app (cur_tab garde son nom mais sémantique = app courante) */
@@ -568,6 +569,16 @@ static void bap_refresh_list(void) {
         struct dirent *de;
         while ((de = readdir(d)) && bad_entries_n < (int)(sizeof(bad_entries)/sizeof(bad_entries[0]))) {
             if (de->d_name[0] == '.') continue;
+            /* filtre les dechets crees par Windows / Mac sur la cle FAT */
+            if (strcasecmp(de->d_name, "System Volume Information") == 0 ||
+                strcasecmp(de->d_name, "$RECYCLE.BIN")               == 0 ||
+                strcasecmp(de->d_name, "RECYCLER")                   == 0 ||
+                strcasecmp(de->d_name, "desktop.ini")                == 0 ||
+                strcasecmp(de->d_name, "Thumbs.db")                  == 0 ||
+                strcasecmp(de->d_name, ".Trashes")                   == 0 ||
+                strcasecmp(de->d_name, ".Spotlight-V100")            == 0 ||
+                strcasecmp(de->d_name, ".fseventsd")                 == 0)
+                continue;
             badusb_entry_t *e = &bad_entries[bad_entries_n];
             snprintf(e->path, sizeof(e->path), "%s/%s", bap_cwd, de->d_name);
             strncpy(e->name, de->d_name, sizeof(e->name) - 1);
