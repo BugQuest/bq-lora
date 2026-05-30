@@ -12,13 +12,23 @@
 #include <dirent.h>
 
 /* ---------------------------------------------------------------- état */
-static lv_obj_t *content;          /* zone centrale, reconstruite par onglet */
-static lv_obj_t *kb;               /* clavier virtuel (overlay, masqué) */
-static lv_obj_t *nav_btn[3];
-static uint8_t   cur_chan = 0;     /* canal courant dans la vue chat */
-static int       cur_tab = 0;      /* 0 chat, 1 nodes, 2 sys */
+/* IDs d'app (cur_tab garde son nom mais sémantique = app courante) */
+enum {
+    APP_HOME    = 0,
+    APP_CHAT    = 1,
+    APP_NODES   = 2,
+    APP_SYS     = 3,
+    APP_WIFI    = 4,
+    APP_HOTSPOT = 5,
+    APP_BADUSB  = 6,
+};
 
-static void show_tab(int tab);
+static lv_obj_t *content;          /* zone centrale, reconstruite par app */
+static lv_obj_t *kb;               /* clavier virtuel (overlay, masqué) */
+static uint8_t   cur_chan = 0;     /* canal courant dans la vue chat */
+static int       cur_tab  = APP_HOME;
+
+static void show_tab(int app);
 
 /* ---------------------------------------------------------------- helpers */
 static void flat(lv_obj_t *o) {
@@ -47,8 +57,9 @@ static lv_obj_t *label(lv_obj_t *parent, const char *txt, const lv_font_t *font,
 }
 
 /* ---------------------------------------------------------------- barre haute */
-static lv_obj_t *tb_clock, *tb_usb, *tb_wifi, *tb_name;
+static lv_obj_t *tb_clock, *tb_usb, *tb_wifi, *tb_name, *tb_back;
 static lv_timer_t *tb_timer;
+static void tb_back_cb(lv_event_t *e) { (void)e; show_tab(APP_HOME); }
 
 static int read_int_file(const char *p) {
     FILE *f = fopen(p, "r"); if (!f) return 0;
@@ -108,8 +119,22 @@ static void build_topbar(lv_obj_t *parent) {
     lv_obj_set_style_pad_right(bar, 8, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
+    /* cluster gauche : bouton retour (visible hors HOME) + nom du noeud */
+    tb_back = lv_button_create(bar);
+    lv_obj_set_size(tb_back, 32, 22);
+    lv_obj_align(tb_back, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_radius(tb_back, 2, 0);
+    lv_obj_set_style_bg_opa(tb_back, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(tb_back, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(tb_back, 0, 0);
+    lv_obj_set_style_shadow_width(tb_back, 0, 0);
+    lv_obj_add_event_cb(tb_back, tb_back_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *bl = label(tb_back, LV_SYMBOL_LEFT, FONT_SMALL, CY_TEXT);
+    lv_obj_center(bl);
+    lv_obj_add_flag(tb_back, LV_OBJ_FLAG_HIDDEN);
+
     tb_name = label(bar, settings_node_name(), FONT_MONO, CY_CYAN);
-    lv_obj_align(tb_name, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_align(tb_name, LV_ALIGN_LEFT_MID, 40, 0);
 
     /* cluster d'icônes + horloge à droite */
     lv_obj_t *right = lv_obj_create(bar);
@@ -126,53 +151,6 @@ static void build_topbar(lv_obj_t *parent) {
     tb_wifi = label(right, LV_SYMBOL_WIFI, FONT_SMALL, CY_CYAN);
     lv_obj_add_flag(tb_wifi, LV_OBJ_FLAG_HIDDEN);
     tb_clock = label(right, "--:--", FONT_MONO, CY_TEXT);
-}
-
-/* ---------------------------------------------------------------- nav basse */
-static void nav_cb(lv_event_t *e) {
-    int tab = (int)(intptr_t)lv_event_get_user_data(e);
-    show_tab(tab);
-}
-
-static void build_nav(lv_obj_t *parent) {
-    static const char *labels[3] = { LV_SYMBOL_ENVELOPE " CHAT",
-                                     LV_SYMBOL_GPS " NODES",
-                                     LV_SYMBOL_SETTINGS " SYS" };
-    lv_obj_t *bar = lv_obj_create(parent);
-    lv_obj_set_size(bar, LV_PCT(100), 38);
-    flat(bar);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(CY_PANEL), 0);
-    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(bar, lv_color_hex(CY_CYAN), 0);
-    lv_obj_set_style_border_width(bar, 1, 0);
-    lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_TOP, 0);
-    lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
-
-    for (int i = 0; i < 3; i++) {
-        lv_obj_t *b = lv_button_create(bar);
-        lv_obj_set_height(b, 28);
-        lv_obj_set_flex_grow(b, 1);
-        lv_obj_set_style_radius(b, 2, 0);
-        lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(b, 0, 0);
-        lv_obj_set_style_shadow_width(b, 0, 0);
-        lv_obj_add_event_cb(b, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-        lv_obj_t *l = label(b, labels[i], FONT_SMALL, CY_DIM);
-        lv_obj_center(l);
-        nav_btn[i] = b;
-    }
-}
-
-static void refresh_nav(void) {
-    for (int i = 0; i < 3; i++) {
-        lv_obj_t *l = lv_obj_get_child(nav_btn[i], 0);
-        bool active = (i == cur_tab);
-        lv_obj_set_style_text_color(l, lv_color_hex(active ? CY_CYAN : CY_DIM), 0);
-        lv_obj_set_style_bg_opa(nav_btn[i], active ? LV_OPA_20 : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_bg_color(nav_btn[i], lv_color_hex(CY_CYAN), 0);
-    }
 }
 
 /* ---------------------------------------------------------------- vue CHAT */
@@ -227,7 +205,7 @@ static void rebuild_messages(void) {
 
 static void chan_cb(lv_event_t *e) {
     cur_chan = (uint8_t)(intptr_t)lv_event_get_user_data(e);
-    show_tab(0);
+    show_tab(APP_CHAT);
 }
 
 static void send_cb(lv_event_t *e) {
@@ -250,7 +228,7 @@ static void ta_cb(lv_event_t *e) {
 static void kb_cb(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
     /* valider n'envoie un message que si on est bien dans la zone compose du chat */
-    if (code == LV_EVENT_READY && cur_tab == 0 && compose_ta &&
+    if (code == LV_EVENT_READY && cur_tab == APP_CHAT && compose_ta &&
         lv_keyboard_get_textarea(kb) == compose_ta) {
         send_cb(e);
     }
@@ -824,44 +802,6 @@ static void build_sys(void) {
     sys_lbl_ssh_btn = label(sys_btn_ssh, "?", FONT_SMALL, CY_TEXT);
     lv_obj_center(sys_lbl_ssh_btn);
 
-    s = section(col, "WIFI");
-    lv_obj_t *r3 = lv_obj_create(s);
-    lv_obj_set_size(r3, LV_PCT(100), LV_SIZE_CONTENT);
-    flat(r3); lv_obj_set_flex_flow(r3, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(r3, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(r3, LV_OBJ_FLAG_SCROLLABLE);
-    sys_lbl_wifi = label(r3, "-", FONT_SMALL, CY_TEXT);
-    lv_obj_t *wbtn = lv_button_create(r3);
-    lv_obj_set_size(wbtn, 110, 30);
-    lv_obj_set_style_radius(wbtn, 2, 0);
-    lv_obj_set_style_bg_opa(wbtn, LV_OPA_30, 0);
-    lv_obj_set_style_bg_color(wbtn, lv_color_hex(CY_MAGENTA), 0);
-    lv_obj_set_style_border_width(wbtn, 1, 0);
-    lv_obj_set_style_border_color(wbtn, lv_color_hex(CY_MAGENTA), 0);
-    lv_obj_set_style_shadow_width(wbtn, 0, 0);
-    lv_obj_add_event_cb(wbtn, wifi_btn_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *wl = label(wbtn, LV_SYMBOL_WIFI "  RESEAUX", FONT_SMALL, CY_TEXT);
-    lv_obj_center(wl);
-
-    /* WIFI : ligne radio on/off */
-    lv_obj_t *rwr = lv_obj_create(s);
-    lv_obj_set_size(rwr, LV_PCT(100), LV_SIZE_CONTENT);
-    flat(rwr); lv_obj_set_flex_flow(rwr, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(rwr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(rwr, LV_OBJ_FLAG_SCROLLABLE);
-    sys_lbl_wifi_radio_state = label(rwr, "?", FONT_BODY, CY_DIM);
-    lv_obj_t *wrbtn = lv_button_create(rwr);
-    lv_obj_set_size(wrbtn, 130, 30);
-    lv_obj_set_style_radius(wrbtn, 2, 0);
-    lv_obj_set_style_bg_opa(wrbtn, LV_OPA_30, 0);
-    lv_obj_set_style_bg_color(wrbtn, lv_color_hex(CY_CYAN), 0);
-    lv_obj_set_style_border_width(wrbtn, 1, 0);
-    lv_obj_set_style_border_color(wrbtn, lv_color_hex(CY_CYAN), 0);
-    lv_obj_set_style_shadow_width(wrbtn, 0, 0);
-    lv_obj_add_event_cb(wrbtn, wifi_radio_toggle_cb, LV_EVENT_CLICKED, NULL);
-    sys_lbl_wifi_radio_btn = label(wrbtn, "?", FONT_SMALL, CY_TEXT);
-    lv_obj_center(sys_lbl_wifi_radio_btn);
-
     /* BLUETOOTH */
     s = section(col, "BLUETOOTH");
     lv_obj_t *rb = lv_obj_create(s);
@@ -882,94 +822,11 @@ static void build_sys(void) {
     sys_lbl_bt_btn = label(bbtn, "?", FONT_SMALL, CY_TEXT);
     lv_obj_center(sys_lbl_bt_btn);
 
-    s = section(col, "HOTSPOT");
-    lv_obj_t *r4 = lv_obj_create(s);
-    lv_obj_set_size(r4, LV_PCT(100), LV_SIZE_CONTENT);
-    flat(r4); lv_obj_set_flex_flow(r4, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(r4, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(r4, LV_OBJ_FLAG_SCROLLABLE);
-    sys_lbl_hot_state = label(r4, "?", FONT_BODY, CY_DIM);
-    lv_obj_t *hbtn = lv_button_create(r4);
-    lv_obj_set_size(hbtn, 130, 30);
-    lv_obj_set_style_radius(hbtn, 2, 0);
-    lv_obj_set_style_bg_opa(hbtn, LV_OPA_30, 0);
-    lv_obj_set_style_bg_color(hbtn, lv_color_hex(CY_MAGENTA), 0);
-    lv_obj_set_style_border_width(hbtn, 1, 0);
-    lv_obj_set_style_border_color(hbtn, lv_color_hex(CY_MAGENTA), 0);
-    lv_obj_set_style_shadow_width(hbtn, 0, 0);
-    lv_obj_add_event_cb(hbtn, hot_toggle_cb, LV_EVENT_CLICKED, NULL);
-    sys_lbl_hot_btn = label(hbtn, "?", FONT_SMALL, CY_TEXT);
-    lv_obj_center(sys_lbl_hot_btn);
-    char credbuf[160]; snprintf(credbuf, sizeof(credbuf), "SSID: %s   pass: %s",
-                                settings_hotspot_ssid(), settings_hotspot_pass());
-    lv_obj_t *credline = label(s, credbuf, FONT_SMALL, CY_DIM);
-    (void)credline;
-    small_button(s, LV_SYMBOL_IMAGE "  QR CODE WIFI", CY_MAGENTA, qr_open_cb);
-
     s = section(col, "USB");
     sys_lbl_usb_state = info_row(s, "etat");
     sys_lbl_usb_ip    = info_row(s, "ip Pi");
     lv_obj_t *usbhint = label(s, "Brancher PC sur le port USB (milieu) du Pi", FONT_SMALL, CY_DIM);
     (void)usbhint;
-
-    /* --- BAD USB --- */
-    s = section(col, "BAD USB");
-    lv_obj_t *rbu = lv_obj_create(s);
-    lv_obj_set_size(rbu, LV_PCT(100), LV_SIZE_CONTENT);
-    flat(rbu); lv_obj_set_flex_flow(rbu, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(rbu, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(rbu, LV_OBJ_FLAG_SCROLLABLE);
-    sys_lbl_usb_mode_state = label(rbu, "?", FONT_BODY, CY_DIM);
-    lv_obj_t *mbtn = lv_button_create(rbu);
-    lv_obj_set_size(mbtn, 130, 30);
-    lv_obj_set_style_radius(mbtn, 2, 0);
-    lv_obj_set_style_bg_opa(mbtn, LV_OPA_30, 0);
-    lv_obj_set_style_bg_color(mbtn, lv_color_hex(CY_MAGENTA), 0);
-    lv_obj_set_style_border_width(mbtn, 1, 0);
-    lv_obj_set_style_border_color(mbtn, lv_color_hex(CY_MAGENTA), 0);
-    lv_obj_set_style_shadow_width(mbtn, 0, 0);
-    lv_obj_add_event_cb(mbtn, usb_mode_toggle_cb, LV_EVENT_CLICKED, NULL);
-    sys_lbl_usb_mode_btn = label(mbtn, "?", FONT_SMALL, CY_TEXT);
-    lv_obj_center(sys_lbl_usb_mode_btn);
-
-    /* liste les scripts ducky */
-    bad_entries_n = 0;
-    DIR *bd = opendir(BADUSB_DIR);
-    if (bd) {
-        struct dirent *de;
-        while ((de = readdir(bd)) && bad_entries_n < (int)(sizeof(bad_entries)/sizeof(bad_entries[0]))) {
-            if (de->d_name[0] == '.') continue;
-            badusb_entry_t *e = &bad_entries[bad_entries_n];
-            snprintf(e->path, sizeof(e->path), BADUSB_DIR "/%s", de->d_name);
-            strncpy(e->name, de->d_name, sizeof(e->name) - 1);
-            e->name[sizeof(e->name) - 1] = 0;
-            bad_entries_n++;
-        }
-        closedir(bd);
-    }
-    if (bad_entries_n == 0) {
-        label(s, "(aucun script dans " BADUSB_DIR ")", FONT_SMALL, CY_DIM);
-    } else {
-        for (int i = 0; i < bad_entries_n; i++) {
-            lv_obj_t *r = lv_obj_create(s);
-            lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
-            flat(r); lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
-            lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-            lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
-            label(r, bad_entries[i].name, FONT_SMALL, CY_TEXT);
-            lv_obj_t *rb = lv_button_create(r);
-            lv_obj_set_size(rb, 70, 26);
-            lv_obj_set_style_radius(rb, 2, 0);
-            lv_obj_set_style_bg_opa(rb, LV_OPA_30, 0);
-            lv_obj_set_style_bg_color(rb, lv_color_hex(CY_MAGENTA), 0);
-            lv_obj_set_style_border_width(rb, 1, 0);
-            lv_obj_set_style_border_color(rb, lv_color_hex(CY_MAGENTA), 0);
-            lv_obj_set_style_shadow_width(rb, 0, 0);
-            lv_obj_add_event_cb(rb, bad_run_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-            lv_obj_t *rl = label(rb, "RUN", FONT_SMALL, CY_TEXT);
-            lv_obj_center(rl);
-        }
-    }
 
     s = section(col, "REGLAGES");
     small_button(s, LV_SYMBOL_SETTINGS "  MODIFIER", CY_CYAN, settings_modal_open_e);
@@ -1213,16 +1070,247 @@ static void wifi_modal_open(void) {
 }
 
 /* ---------------------------------------------------------------- routage */
-static void show_tab(int tab) {
+static void build_home(void);
+static void build_hotspot_app(void);
+static void build_badusb_app(void);
+
+static void show_tab(int app) {
     if (sys_refresh_timer) { lv_timer_delete(sys_refresh_timer); sys_refresh_timer = NULL; }
-    sys_lbl_host = NULL;   /* invalidé par lv_obj_clean */
-    compose_ta   = NULL;   /* pointeur du chat libéré quand on quitte CHAT */
-    cur_tab = tab;
+    sys_lbl_host = NULL;
+    compose_ta   = NULL;
+    cur_tab = app;
     lv_obj_clean(content);
-    if (tab == 0)      build_chat();
-    else if (tab == 1) build_nodes();
-    else               build_sys();
-    refresh_nav();
+
+    /* bouton retour + repositionnement du nom selon que le retour est visible */
+    if (tb_back && tb_name) {
+        if (app == APP_HOME) {
+            lv_obj_add_flag(tb_back, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_align(tb_name, LV_ALIGN_LEFT_MID, 0, 0);
+        } else {
+            lv_obj_clear_flag(tb_back, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_align(tb_name, LV_ALIGN_LEFT_MID, 40, 0);
+        }
+    }
+
+    switch (app) {
+        case APP_HOME:    build_home();          break;
+        case APP_CHAT:    build_chat();          break;
+        case APP_NODES:   build_nodes();         break;
+        case APP_SYS:     build_sys();           break;
+        case APP_HOTSPOT: build_hotspot_app();   break;
+        case APP_BADUSB:  build_badusb_app();    break;
+        case APP_WIFI:
+            /* WIFI = modal flottant ; reste sur la dernière vue dessous */
+            cur_tab = APP_HOME;
+            build_home();
+            wifi_modal_open();
+            break;
+        default: build_home(); break;
+    }
+}
+
+/* ---------------------------------------------------------------- HOME hub */
+typedef struct {
+    int          app_id;
+    const char  *title;
+    const char  *icon;
+    uint32_t     color;
+} app_card_t;
+
+static const app_card_t HOME_APPS[] = {
+    { APP_CHAT,    "MESSAGES", LV_SYMBOL_ENVELOPE, CY_CYAN    },
+    { APP_NODES,   "NODES",    LV_SYMBOL_GPS,      CY_CYAN    },
+    { APP_WIFI,    "WIFI",     LV_SYMBOL_WIFI,     CY_CYAN    },
+    { APP_HOTSPOT, "HOTSPOT",  LV_SYMBOL_IMAGE,    CY_MAGENTA },
+    { APP_BADUSB,  "BAD USB",  LV_SYMBOL_USB,      CY_MAGENTA },
+    { APP_SYS,     "SYSTEME",  LV_SYMBOL_SETTINGS, CY_AMBER   },
+};
+
+static void home_card_cb(lv_event_t *e) {
+    int id = (int)(intptr_t)lv_event_get_user_data(e);
+    show_tab(id);
+}
+
+static void build_home(void) {
+    lv_obj_t *col = lv_obj_create(content);
+    lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
+    flat(col);
+    lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_all(col, 6, 0);
+
+    /* baniere */
+    lv_obj_t *banner = label(col, "// CYBERDECK //", FONT_MONO, CY_MAGENTA);
+    lv_obj_align(banner, LV_ALIGN_TOP_MID, 0, 4);
+
+    /* grille 2 col x 3 lignes */
+    lv_obj_t *grid = lv_obj_create(col);
+    lv_obj_set_size(grid, LV_PCT(100), LV_PCT(100));
+    flat(grid);
+    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_top(grid, 30, 0);
+    lv_obj_set_style_pad_row(grid, 8, 0);
+    lv_obj_set_style_pad_column(grid, 8, 0);
+    lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
+
+    int n = (int)(sizeof(HOME_APPS) / sizeof(HOME_APPS[0]));
+    for (int i = 0; i < n; i++) {
+        const app_card_t *a = &HOME_APPS[i];
+        lv_obj_t *c = lv_button_create(grid);
+        lv_obj_set_size(c, LV_PCT(48), 115);
+        lv_obj_set_style_radius(c, 2, 0);
+        lv_obj_set_style_bg_color(c, lv_color_hex(CY_PANEL), 0);
+        lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_color(c, lv_color_hex(a->color), 0);
+        lv_obj_set_style_border_width(c, 1, 0);
+        lv_obj_set_style_shadow_width(c, 0, 0);
+        lv_obj_set_style_pad_all(c, 4, 0);
+        lv_obj_add_event_cb(c, home_card_cb, LV_EVENT_CLICKED, (void *)(intptr_t)a->app_id);
+
+        lv_obj_t *ic = label(c, a->icon, &lv_font_montserrat_28, a->color);
+        lv_obj_align(ic, LV_ALIGN_CENTER, 0, -10);
+        lv_obj_t *t = label(c, a->title, FONT_MONO, CY_TEXT);
+        lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, -4);
+    }
+}
+
+/* ---------------------------------------------------------------- app HOTSPOT */
+static lv_obj_t *hap_lbl_state, *hap_lbl_btn;
+
+static void hap_qr_cb(lv_event_t *e) { qr_open_cb(e); }
+static void hap_refresh(lv_timer_t *t) {
+    (void)t;
+    if (!hap_lbl_state) return;
+    bool on = sys_hotspot_active();
+    lv_label_set_text(hap_lbl_state, on ? "actif" : "inactif");
+    lv_obj_set_style_text_color(hap_lbl_state, lv_color_hex(on ? CY_GREEN : CY_DIM), 0);
+    lv_label_set_text(hap_lbl_btn, on ? "DESACTIVER" : "ACTIVER");
+}
+static void build_hotspot_app(void) {
+    lv_obj_t *col = lv_obj_create(content);
+    lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
+    flat(col);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(col, 10, 0);
+    lv_obj_set_style_pad_row(col, 10, 0);
+    lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = label(col, "HOTSPOT", FONT_BIG, CY_MAGENTA);
+    (void)title;
+
+    lv_obj_t *r = lv_obj_create(col);
+    lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(r); lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+    hap_lbl_state = label(r, "?", FONT_BODY, CY_DIM);
+    lv_obj_t *btn = lv_button_create(r);
+    lv_obj_set_size(btn, 150, 32);
+    lv_obj_set_style_radius(btn, 2, 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_border_width(btn, 1, 0);
+    lv_obj_set_style_border_color(btn, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_add_event_cb(btn, hot_toggle_cb, LV_EVENT_CLICKED, NULL);
+    hap_lbl_btn = label(btn, "?", FONT_SMALL, CY_TEXT);
+    lv_obj_center(hap_lbl_btn);
+
+    /* creds */
+    char credbuf[160]; snprintf(credbuf, sizeof(credbuf), "SSID  %s\npass  %s",
+                                settings_hotspot_ssid(), settings_hotspot_pass());
+    label(col, credbuf, FONT_BODY, CY_TEXT);
+
+    small_button(col, LV_SYMBOL_IMAGE "  QR CODE WIFI", CY_MAGENTA, hap_qr_cb);
+
+    /* refresh */
+    hap_refresh(NULL);
+    sys_refresh_timer = lv_timer_create(hap_refresh, 3000, NULL);
+}
+
+/* ---------------------------------------------------------------- app BAD USB */
+static lv_obj_t *bap_lbl_state, *bap_lbl_btn;
+
+static void bap_refresh(lv_timer_t *t) {
+    (void)t;
+    if (!bap_lbl_state) return;
+    usb_mode_t m = sys_usb_mode();
+    const char *s = (m == USB_MODE_HID) ? "CLAVIER" : (m == USB_MODE_NCM) ? "RESEAU" : "?";
+    lv_label_set_text(bap_lbl_state, s);
+    lv_obj_set_style_text_color(bap_lbl_state,
+        lv_color_hex(m == USB_MODE_HID ? CY_MAGENTA : CY_CYAN), 0);
+    lv_label_set_text(bap_lbl_btn, m == USB_MODE_HID ? "MODE RESEAU" : "MODE CLAVIER");
+}
+
+static void build_badusb_app(void) {
+    lv_obj_t *col = lv_obj_create(content);
+    lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
+    flat(col);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(col, 10, 0);
+    lv_obj_set_style_pad_row(col, 8, 0);
+    lv_obj_set_scroll_dir(col, LV_DIR_VER);
+
+    label(col, "BAD USB", FONT_BIG, CY_MAGENTA);
+
+    lv_obj_t *r = lv_obj_create(col);
+    lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(r); lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+    bap_lbl_state = label(r, "?", FONT_BODY, CY_DIM);
+    lv_obj_t *btn = lv_button_create(r);
+    lv_obj_set_size(btn, 150, 32);
+    lv_obj_set_style_radius(btn, 2, 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_border_width(btn, 1, 0);
+    lv_obj_set_style_border_color(btn, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_add_event_cb(btn, usb_mode_toggle_cb, LV_EVENT_CLICKED, NULL);
+    bap_lbl_btn = label(btn, "?", FONT_SMALL, CY_TEXT);
+    lv_obj_center(bap_lbl_btn);
+
+    /* liste scripts */
+    bad_entries_n = 0;
+    DIR *bd = opendir(BADUSB_DIR);
+    if (bd) {
+        struct dirent *de;
+        while ((de = readdir(bd)) && bad_entries_n < (int)(sizeof(bad_entries)/sizeof(bad_entries[0]))) {
+            if (de->d_name[0] == '.') continue;
+            badusb_entry_t *e = &bad_entries[bad_entries_n];
+            snprintf(e->path, sizeof(e->path), BADUSB_DIR "/%s", de->d_name);
+            strncpy(e->name, de->d_name, sizeof(e->name) - 1);
+            e->name[sizeof(e->name) - 1] = 0;
+            bad_entries_n++;
+        }
+        closedir(bd);
+    }
+    if (bad_entries_n == 0) {
+        label(col, "(aucun script dans " BADUSB_DIR ")", FONT_SMALL, CY_DIM);
+    } else {
+        for (int i = 0; i < bad_entries_n; i++) {
+            lv_obj_t *rr = lv_obj_create(col);
+            lv_obj_set_size(rr, LV_PCT(100), LV_SIZE_CONTENT);
+            flat(rr); lv_obj_set_flex_flow(rr, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(rr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_clear_flag(rr, LV_OBJ_FLAG_SCROLLABLE);
+            label(rr, bad_entries[i].name, FONT_BODY, CY_TEXT);
+            lv_obj_t *rb = lv_button_create(rr);
+            lv_obj_set_size(rb, 80, 28);
+            lv_obj_set_style_radius(rb, 2, 0);
+            lv_obj_set_style_bg_opa(rb, LV_OPA_30, 0);
+            lv_obj_set_style_bg_color(rb, lv_color_hex(CY_MAGENTA), 0);
+            lv_obj_set_style_border_width(rb, 1, 0);
+            lv_obj_set_style_border_color(rb, lv_color_hex(CY_MAGENTA), 0);
+            lv_obj_set_style_shadow_width(rb, 0, 0);
+            lv_obj_add_event_cb(rb, bad_run_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+            lv_obj_t *rl = label(rb, "RUN", FONT_SMALL, CY_TEXT);
+            lv_obj_center(rl);
+        }
+    }
+    bap_refresh(NULL);
+    sys_refresh_timer = lv_timer_create(bap_refresh, 3000, NULL);
 }
 
 /* ---------------------------------------------------------------- splash */
@@ -1338,8 +1426,6 @@ void ui_init(void) {
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
 
-    build_nav(scr);
-
     /* clavier overlay sur le top layer : visible au-dessus de tout (chat + modaux) */
     kb = lv_keyboard_create(lv_layer_top());
 
@@ -1374,5 +1460,5 @@ void ui_init(void) {
     lv_obj_add_event_cb(kb, kb_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(kb, kb_cb, LV_EVENT_CANCEL, NULL);
 
-    show_tab(0);
+    show_tab(APP_HOME);
 }
