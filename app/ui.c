@@ -1060,8 +1060,8 @@ static void wifi_modal_open(void) {
     wifi_status = label(wifi_ov, "scan en cours...", FONT_SMALL, CY_CYAN);
     lv_obj_align(wifi_status, LV_ALIGN_TOP_MID, 0, 44);
     wifi_list_ov = lv_obj_create(wifi_ov);
-    lv_obj_set_size(wifi_list_ov, LV_PCT(100), LV_PCT(100) - 70);
-    lv_obj_align(wifi_list_ov, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_obj_set_size(wifi_list_ov, LV_PCT(100), 390);
+    lv_obj_align(wifi_list_ov, LV_ALIGN_TOP_MID, 0, 70);
     flat(wifi_list_ov);
     lv_obj_set_flex_flow(wifi_list_ov, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(wifi_list_ov, 4, 0);
