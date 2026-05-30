@@ -248,7 +248,11 @@ static void ta_cb(lv_event_t *e) {
 
 static void kb_cb(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_READY) send_cb(e);
+    /* valider n'envoie un message que si on est bien dans la zone compose du chat */
+    if (code == LV_EVENT_READY && cur_tab == 0 && compose_ta &&
+        lv_keyboard_get_textarea(kb) == compose_ta) {
+        send_cb(e);
+    }
     lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -953,6 +957,7 @@ static void wifi_modal_open(void) {
 static void show_tab(int tab) {
     if (sys_refresh_timer) { lv_timer_delete(sys_refresh_timer); sys_refresh_timer = NULL; }
     sys_lbl_host = NULL;   /* invalidé par lv_obj_clean */
+    compose_ta   = NULL;   /* pointeur du chat libéré quand on quitte CHAT */
     cur_tab = tab;
     lv_obj_clean(content);
     if (tab == 0)      build_chat();
@@ -1076,6 +1081,32 @@ void ui_init(void) {
 
     /* clavier overlay sur le top layer : visible au-dessus de tout (chat + modaux) */
     kb = lv_keyboard_create(lv_layer_top());
+
+    /* AZERTY minuscules */
+    static const char *kb_map_lower[] = {
+        "1","2","3","4","5","6","7","8","9","0","\n",
+        "a","z","e","r","t","y","u","i","o","p","\n",
+        "q","s","d","f","g","h","j","k","l","m","\n",
+        "ABC","w","x","c","v","b","n","'","-",LV_SYMBOL_BACKSPACE,"\n",
+        "1#"," ",".",LV_SYMBOL_OK,""
+    };
+    /* AZERTY majuscules */
+    static const char *kb_map_upper[] = {
+        "1","2","3","4","5","6","7","8","9","0","\n",
+        "A","Z","E","R","T","Y","U","I","O","P","\n",
+        "Q","S","D","F","G","H","J","K","L","M","\n",
+        "abc","W","X","C","V","B","N","'","-",LV_SYMBOL_BACKSPACE,"\n",
+        "1#"," ",".",LV_SYMBOL_OK,""
+    };
+    static const lv_buttonmatrix_ctrl_t kb_ctrl[] = {
+        1,1,1,1,1,1,1,1,1,1,
+        1,1,1,1,1,1,1,1,1,1,
+        1,1,1,1,1,1,1,1,1,1,
+        1,1,1,1,1,1,1,1,1,1,
+        2,6,1,2
+    };
+    lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_lower, kb_ctrl);
+    lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_TEXT_UPPER, kb_map_upper, kb_ctrl);
     lv_obj_set_size(kb, LV_PCT(100), LV_PCT(55));
     lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
