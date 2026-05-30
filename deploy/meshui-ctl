@@ -36,6 +36,19 @@ case "$1" in
     timezone)
         exec /usr/bin/timedatectl set-timezone "$2"
         ;;
+    wifi-on)
+        exec /usr/bin/nmcli radio wifi on
+        ;;
+    wifi-off)
+        exec /usr/bin/nmcli radio wifi off
+        ;;
+    bt-on)
+        /usr/sbin/rfkill unblock bluetooth || true
+        systemctl start bluetooth.service 2>/dev/null || true
+        ;;
+    bt-off)
+        exec /usr/sbin/rfkill block bluetooth
+        ;;
     wifi-scan)
         exec /usr/bin/nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list --rescan yes
         ;;

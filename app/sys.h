@@ -30,6 +30,15 @@ void sys_ssh_set(bool on);
 
 bool sys_hotspot_active(void);
 void sys_hotspot_set(bool on);
+
+/* Radio WiFi (nmcli radio wifi on/off). */
+bool sys_wifi_radio_on(void);
+void sys_wifi_radio_set(bool on);
+
+/* Bluetooth (rfkill + bluetooth.service). */
+bool sys_bt_on(void);
+void sys_bt_set(bool on);
+
 /* Change le fuseau horaire systeme (timedatectl set-timezone). */
 void sys_set_timezone(const char *tz);
 

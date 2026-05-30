@@ -367,6 +367,8 @@ static lv_obj_t *sys_lbl_ssh_state, *sys_lbl_ssh_btn, *sys_btn_ssh;
 static lv_obj_t *sys_lbl_wifi;
 static lv_obj_t *sys_lbl_hot_state, *sys_lbl_hot_btn;
 static lv_obj_t *sys_lbl_usb_state, *sys_lbl_usb_ip;
+static lv_obj_t *sys_lbl_wifi_radio_state, *sys_lbl_wifi_radio_btn;
+static lv_obj_t *sys_lbl_bt_state, *sys_lbl_bt_btn;
 static lv_obj_t *sys_log_ta;
 static lv_obj_t *sys_bl_slider, *sys_bl_lbl;
 static lv_timer_t *sys_refresh_timer;
@@ -423,6 +425,18 @@ static void calib_cb(lv_event_t *e)    { (void)e; calib_start(NULL); }
 static void ssh_toggle_cb(lv_event_t *e) { (void)e; sys_ssh_set(!sys_ssh_running()); }
 
 static void hot_yes(void)        { sys_hotspot_set(!sys_hotspot_active()); }
+
+static void wifi_radio_yes(void) { sys_wifi_radio_set(!sys_wifi_radio_on()); }
+static void wifi_radio_toggle_cb(lv_event_t *e) {
+    (void)e;
+    if (sys_wifi_radio_on())
+        confirm_dialog("Couper le WiFi ?\n(coupe la session SSH WiFi)", wifi_radio_yes);
+    else
+        wifi_radio_yes();
+}
+
+static void bt_yes(void) { sys_bt_set(!sys_bt_on()); }
+static void bt_toggle_cb(lv_event_t *e) { (void)e; bt_yes(); }
 static void beep_cb(lv_event_t *e) { (void)e; sys_beep(1500, 120); }
 
 static void bl_slider_cb(lv_event_t *e) {
@@ -599,6 +613,21 @@ static void sys_refresh(lv_timer_t *t) {
         snprintf(b, sizeof(b), "%s", i.wifi_ssid);
     lv_label_set_text(sys_lbl_wifi, b);
 
+    if (sys_lbl_wifi_radio_state) {
+        bool radio = sys_wifi_radio_on();
+        lv_label_set_text(sys_lbl_wifi_radio_state, radio ? "radio active" : "radio coupee");
+        lv_obj_set_style_text_color(sys_lbl_wifi_radio_state,
+            lv_color_hex(radio ? CY_GREEN : CY_DIM), 0);
+        lv_label_set_text(sys_lbl_wifi_radio_btn, radio ? "DESACTIVER" : "ACTIVER");
+    }
+    if (sys_lbl_bt_state) {
+        bool bt = sys_bt_on();
+        lv_label_set_text(sys_lbl_bt_state, bt ? "actif" : "coupe");
+        lv_obj_set_style_text_color(sys_lbl_bt_state,
+            lv_color_hex(bt ? CY_GREEN : CY_DIM), 0);
+        lv_label_set_text(sys_lbl_bt_btn, bt ? "DESACTIVER" : "ACTIVER");
+    }
+
     if (sys_lbl_hot_state) {
         bool hot = sys_hotspot_active();
         lv_label_set_text(sys_lbl_hot_state, hot ? "actif" : "inactif");
@@ -681,6 +710,45 @@ static void build_sys(void) {
     lv_obj_add_event_cb(wbtn, wifi_btn_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *wl = label(wbtn, LV_SYMBOL_WIFI "  RESEAUX", FONT_SMALL, CY_TEXT);
     lv_obj_center(wl);
+
+    /* WIFI : ligne radio on/off */
+    lv_obj_t *rwr = lv_obj_create(s);
+    lv_obj_set_size(rwr, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(rwr); lv_obj_set_flex_flow(rwr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(rwr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(rwr, LV_OBJ_FLAG_SCROLLABLE);
+    sys_lbl_wifi_radio_state = label(rwr, "?", FONT_BODY, CY_DIM);
+    lv_obj_t *wrbtn = lv_button_create(rwr);
+    lv_obj_set_size(wrbtn, 130, 30);
+    lv_obj_set_style_radius(wrbtn, 2, 0);
+    lv_obj_set_style_bg_opa(wrbtn, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(wrbtn, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(wrbtn, 1, 0);
+    lv_obj_set_style_border_color(wrbtn, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_shadow_width(wrbtn, 0, 0);
+    lv_obj_add_event_cb(wrbtn, wifi_radio_toggle_cb, LV_EVENT_CLICKED, NULL);
+    sys_lbl_wifi_radio_btn = label(wrbtn, "?", FONT_SMALL, CY_TEXT);
+    lv_obj_center(sys_lbl_wifi_radio_btn);
+
+    /* BLUETOOTH */
+    s = section(col, "BLUETOOTH");
+    lv_obj_t *rb = lv_obj_create(s);
+    lv_obj_set_size(rb, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(rb); lv_obj_set_flex_flow(rb, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(rb, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(rb, LV_OBJ_FLAG_SCROLLABLE);
+    sys_lbl_bt_state = label(rb, "?", FONT_BODY, CY_DIM);
+    lv_obj_t *bbtn = lv_button_create(rb);
+    lv_obj_set_size(bbtn, 130, 30);
+    lv_obj_set_style_radius(bbtn, 2, 0);
+    lv_obj_set_style_bg_opa(bbtn, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(bbtn, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(bbtn, 1, 0);
+    lv_obj_set_style_border_color(bbtn, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_shadow_width(bbtn, 0, 0);
+    lv_obj_add_event_cb(bbtn, bt_toggle_cb, LV_EVENT_CLICKED, NULL);
+    sys_lbl_bt_btn = label(bbtn, "?", FONT_SMALL, CY_TEXT);
+    lv_obj_center(sys_lbl_bt_btn);
 
     s = section(col, "HOTSPOT");
     lv_obj_t *r4 = lv_obj_create(s);

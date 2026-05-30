@@ -174,6 +174,35 @@ void sys_set_timezone(const char *tz)
     system(cmd);
 }
 
+bool sys_wifi_radio_on(void)
+{
+    char b[16]; run_get("nmcli radio wifi 2>/dev/null", b, sizeof(b));
+    return strcmp(b, "enabled") == 0;
+}
+
+void sys_wifi_radio_set(bool on)
+{
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), CTL " %s &", on ? "wifi-on" : "wifi-off");
+    system(cmd);
+}
+
+bool sys_bt_on(void)
+{
+    /* "Soft blocked: no" => actif */
+    char b[16];
+    run_get("rfkill list bluetooth 2>/dev/null | awk -F: '/Soft blocked/{gsub(/ /,\"\",$2); print $2; exit}'",
+            b, sizeof(b));
+    return strcmp(b, "no") == 0;
+}
+
+void sys_bt_set(bool on)
+{
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), CTL " %s &", on ? "bt-on" : "bt-off");
+    system(cmd);
+}
+
 #define PWM_DUTY   "/sys/class/pwm/pwmchip0/pwm0/duty_cycle"
 #define PWM_PERIOD 1000000
 
