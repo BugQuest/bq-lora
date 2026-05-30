@@ -11,7 +11,12 @@ for _ in 1 2 3 4 5; do
     [ -d "$CHIP" ] && break
     sleep 0.3
 done
-[ -d "$CHIP" ] || { echo "pwmchip0 absent (overlay pwm pas charge ?)"; exit 1; }
+if [ ! -d "$CHIP" ]; then
+    # Fallback : driver PWM absent -> rester allume en GPIO digital high
+    echo "pwmchip0 absent, fallback GPIO18 = HIGH"
+    /usr/bin/pinctrl set 18 op dh || true
+    exit 0
+fi
 
 # Export du channel 0 si pas deja fait
 [ -d "$PWM" ] || echo 0 > "$CHIP/export"
