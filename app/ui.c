@@ -985,11 +985,13 @@ void ui_show_splash(void (*done)(void)) {
     splash_done = done;
 
     splash_ov = lv_obj_create(lv_layer_top());
+    lv_obj_set_pos(splash_ov, 0, 0);
     lv_obj_set_size(splash_ov, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_bg_color(splash_ov, lv_color_hex(CY_BG), 0);
     lv_obj_set_style_bg_opa(splash_ov, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(splash_ov, 0, 0);
     lv_obj_set_style_radius(splash_ov, 0, 0);
+    lv_obj_set_style_pad_all(splash_ov, 0, 0);
     lv_obj_clear_flag(splash_ov, LV_OBJ_FLAG_SCROLLABLE);
 
     /* Crochets cyan aux 4 coins */
