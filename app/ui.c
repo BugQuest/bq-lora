@@ -1245,9 +1245,13 @@ static void show_tab(int app) {
         case APP_HOTSPOT: build_hotspot_app();   break;
         case APP_BADUSB:  build_badusb_app();    break;
         case APP_WIFI:
-            /* WIFI = modal flottant ; reste sur la dernière vue dessous */
+            /* WIFI = modal flottant ; on reste conceptuellement sur HOME */
             cur_tab = APP_HOME;
             build_home();
+            if (tb_back) {
+                lv_obj_add_flag(tb_back, LV_OBJ_FLAG_HIDDEN);
+                if (tb_name) lv_obj_align(tb_name, LV_ALIGN_LEFT_MID, 0, 0);
+            }
             wifi_modal_open();
             break;
         default: build_home(); break;
