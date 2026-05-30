@@ -31,8 +31,11 @@ Modifiers : CTRL/CONTROL, SHIFT, ALT, ALTGR/RALT/RIGHTALT, GUI/WIN/WINDOWS/CMD/C
 import sys, time
 
 SHIFT = 0x02
-ALTGR = 0x40
 ALT   = 0x04
+# AltGr : on simule par Ctrl+Alt (0x05). RightAlt seul (0x40) est
+# inconsistant cote Windows ; Ctrl+Alt est interprete comme AltGr par
+# le subsystem clavier Windows FR. Plus fiable cross-version.
+ALTGR = 0x05
 
 # -------- LAYOUTS --------
 HID_US = {
@@ -136,6 +139,11 @@ def send_report(fd, mod, codes):
     fd.write(bytes(rpt)); fd.flush()
 
 def press(fd, mod, code):
+    # AltGr (Ctrl+Alt) : appuyer le modificateur AVANT la touche, sinon
+    # Windows n'a pas le temps d'entrer dans la couche AltGr et tape
+    # la touche sans, donnant un mauvais caractere.
+    if (mod & 0x05) == 0x05 and code:
+        send_report(fd, mod, [])
     send_report(fd, mod, [code] if code else [])
     send_report(fd, 0, [])
 
