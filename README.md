@@ -135,25 +135,94 @@ sudo ./build/meshui
 meshtastic-screen/
 ├── README.md
 ├── .gitignore
-├── app/
-│   ├── main.c            # UI LVGL (démo de test pour l'instant)
-│   └── CMakeLists.txt    # build CMake (lie lvgl + lvgl_demos)
+├── app/                      # appli LVGL en C (compilée en ~/meshui/build/meshui)
+│   ├── CMakeLists.txt        # GLOB sur *.c
+│   ├── main.c                # tick + display fbdev + touch + ui_init
+│   ├── ui.c / ui.h           # toute l'UI : topbar, chat, nodes, sys, modales
+│   ├── theme.h               # palette cyberpunk + polices
+│   ├── mesh.c / mesh.h       # backend Meshtastic FACTICE (à remplacer)
+│   ├── sys.c / sys.h         # infos système + actions privilégiées + WiFi async
+│   ├── touch.c / touch.h     # pilote tactile maison (evdev + affine + lissage)
+│   └── calib.c / calib.h     # calibrage 5 points moindres carrés
 ├── config/
-│   └── config.txt.append # overlays fbtft + ads7846 à ajouter sur le Pi
+│   └── config.txt.append     # overlays fbtft + ads7846 + pwm + dwc2
+├── deploy/                   # à installer sur le Pi
+│   ├── provision.sh          # premier-boot : build + services + sudoers
+│   ├── meshui.service        # autostart de l'app
+│   ├── meshui-splash.service # boot splash + détache la console
+│   ├── meshui-ctl            # helper privilégié (NOPASSWD limité)
+│   ├── meshui-sudoers        # règle sudoers correspondante
+│   ├── backlight-init.sh     # PWM GPIO18 init
+│   ├── backlight.service     # systemd oneshot pour le PWM
+│   ├── usb-ncm-setup.sh      # gadget USB CDC NCM (Win11 OK)
+│   └── usb-gadget.service    # systemd pour le gadget USB
+├── tools/                    # utilitaires Python (pas dans le binaire C)
+│   ├── splash.py             # boot splash PIL → fb0
+│   ├── grab.py               # capture fb0 → PNG (dev)
+│   ├── touchcal.py           # relevé tactile brut (dev)
+│   └── beep.py               # tonalité piezo GPIO17 via gpiozero
 └── docs/
-    └── lv_conf.md         # modifications à appliquer à lv_conf.h
+    └── lv_conf.md            # modifs lv_conf.h (gérées par provision.sh)
 ```
 
 ---
 
 ## Feuille de route
 
-- [x] Afficheur ILI9488 fonctionnel (driver `ili9486`, `/dev/fb0`)
-- [x] Rétroéclairage automatique (`led_pin=18`)
-- [x] Tactile ADS7846 détecté (`evdev`)
-- [ ] Build LVGL + rendu à l'écran (en cours)
-- [ ] UI de test custom (titre, boutons, zone messages, indicateurs)
-- [ ] Calibration tactile (`lv_evdev_set_calibration`)
-- [ ] Pilotage beeper (GPIO17)
-- [ ] Gestion luminosité (PWM sur GPIO18)
-- [ ] Intégration Meshtastic (liaison série/BLE vers le nœud LoRa)
+### Matériel & système
+
+- [x] Écran ILI9488 (driver `ili9486`, `/dev/fb0`) en portrait 320×480
+- [x] Rétroéclairage PWM matériel sur GPIO18 (overlay `pwm`)
+- [x] Tactile XPT2046 (`ads7846`) — pilote maison evdev + lissage doigt
+- [x] Calibrage tactile 5 points (affine moindres carrés, persistant)
+- [x] Beeper GPIO17 piloté via `gpiozero`
+- [x] Gadget USB **CDC NCM** (configfs + MS OS descriptors, **Windows 11 compatible**)
+- [x] Hotspot WiFi (NetworkManager `shared`)
+- [x] Démarrage automatique appliance (services systemd, console détachée)
+
+### Interface (cyberpunk minimaliste)
+
+- [x] Identité **BugQuest // LORA** (boot splash PIL + splash app LVGL animé)
+- [x] Topbar avec indicateurs **réels** : icône USB (si bail DHCP usb0), icône WiFi cyan/magenta (client/AP), horloge
+- [x] Onglet **CHAT** : canaux public + chiffrés, fil de messages avec ACK, clavier virtuel
+- [x] Onglet **NODES** : liste des nœuds (factice — backend Meshtastic à brancher)
+- [x] Onglet **SYS** :
+  - INFO (hostname, IPs wlan/usb, uptime, CPU temp, RAM, disque, alim, kernel)
+  - ALIMENTATION (Éteindre / Redémarrer avec confirmation)
+  - SSH (état + ACTIVER/DESACTIVER)
+  - WIFI (SSID/signal + modal scan + connexion avec saisie passphrase)
+  - HOTSPOT (état + toggle + QR code WiFi pour scan téléphone)
+  - USB (état réel + IP côté Pi)
+  - ECRAN (slider luminosité PWM, BIP test, CALIBRER)
+  - APPLICATION (RELANCER MESHUI)
+  - LOG SYSTÈME (`journalctl -n 30` scrollable + rafraîchir)
+- [x] Modal de calibration tactile (croix rouges, 5 points)
+
+### Sécurité
+
+- [x] SSH par clé publique uniquement
+- [x] Helper privilégié `meshui-ctl` + sudoers NOPASSWD strictement limité à ce binaire
+
+### Déploiement
+
+- [x] Workflow flash : Imager pour l'OS + cloud-init `user-data` complété + bundle tarball
+- [x] `provision.sh` idempotent (apt + LVGL clone + lv_conf généré + build + services)
+- [x] 3 voies d'accès SSH : WiFi Freebox, hotspot 10.42.0.1, gadget USB 10.42.0.1
+
+### À faire — Intégration Meshtastic (quand l'antenne arrive)
+
+- [ ] Liaison série + protobuf vers nœud LoRa
+- [ ] Remplacer `mesh.c` factice par vraies données (nœuds, canaux, messages)
+- [ ] Envoi/réception réels sur LongFast + canaux PSK chiffrés
+- [ ] Gestion ACK et reprise sur erreur
+- [ ] Position GPS des nœuds → vue carte hors-ligne (tuiles préchargées)
+
+### À faire — polish & extensions
+
+- [ ] Mode économie (extinction écran après inactivité, réveil au toucher)
+- [ ] Page **Réglages** (node name, SSID/passphrase hotspot, fuseau) sans rebuild
+- [ ] Carnet de contacts / nœuds favoris (alias, notes)
+- [ ] Réglages radio (région, preset, hop limit) — préparation Meshtastic
+- [ ] Variantes de thèmes (palettes cyberpunk alternatives)
+- [ ] Graphes CPU/RAM/temp en temps réel (sparkline)
+- [ ] Scanner Bluetooth (puce BT du Zero 2 W inutilisée)
