@@ -351,6 +351,8 @@ static lv_obj_t *sys_lbl_usb_state, *sys_lbl_usb_ip;
 static lv_obj_t *sys_lbl_wifi_radio_state, *sys_lbl_wifi_radio_btn;
 static lv_obj_t *sys_lbl_bt_state, *sys_lbl_bt_btn;
 static lv_obj_t *sys_lbl_usb_mode_state, *sys_lbl_usb_mode_btn;
+static lv_obj_t *hap_lbl_state, *hap_lbl_btn;     /* app HOTSPOT */
+static lv_obj_t *bap_lbl_state, *bap_lbl_btn;     /* app BAD USB */
 static lv_obj_t *sys_log_ta;
 static lv_obj_t *sys_bl_slider, *sys_bl_lbl;
 static lv_timer_t *sys_refresh_timer;
@@ -1191,8 +1193,6 @@ static void build_home(void) {
 }
 
 /* ---------------------------------------------------------------- app HOTSPOT */
-static lv_obj_t *hap_lbl_state, *hap_lbl_btn;
-
 static void hap_qr_cb(lv_event_t *e) { qr_open_cb(e); }
 static void hap_refresh(lv_timer_t *t) {
     (void)t;
@@ -1250,8 +1250,6 @@ static void build_hotspot_app(void) {
 }
 
 /* ---------------------------------------------------------------- app BAD USB */
-static lv_obj_t *bap_lbl_state, *bap_lbl_btn;
-
 static void bap_refresh(lv_timer_t *t) {
     (void)t;
     if (!bap_lbl_state) return;
