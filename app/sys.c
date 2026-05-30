@@ -164,6 +164,62 @@ void sys_hotspot_set(bool on)
     system(cmd);
 }
 
+#define PWM_DUTY   "/sys/class/pwm/pwmchip0/pwm0/duty_cycle"
+#define PWM_PERIOD 1000000
+
+int sys_backlight_get(void)
+{
+    char b[32]; run_get("cat " PWM_DUTY " 2>/dev/null", b, sizeof(b));
+    int d = atoi(b);
+    return (d * 100 + PWM_PERIOD / 2) / PWM_PERIOD;
+}
+
+void sys_backlight_set(int pct)
+{
+    if (pct < 0)   pct = 0;
+    if (pct > 100) pct = 100;
+    int d = pct * PWM_PERIOD / 100;
+
+    /* Tente l'ecriture directe (permission group video posee par backlight-init.sh). */
+    FILE *f = fopen(PWM_DUTY, "w");
+    if (f) { fprintf(f, "%d\n", d); fclose(f); return; }
+
+    /* Fallback via le helper privilegie. */
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), CTL " backlight %d &", d);
+    system(cmd);
+}
+
+void sys_beep(int freq_hz, int duration_ms)
+{
+    char cmd[160];
+    snprintf(cmd, sizeof(cmd),
+             "/usr/bin/python3 /home/bq-lora/meshui/tools/beep.py %d %d >/dev/null 2>&1 &",
+             freq_hz, duration_ms);
+    system(cmd);
+}
+
+void sys_log_tail(char *out, int cap, int n_lines)
+{
+    out[0] = 0;
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd),
+             "journalctl -n %d --no-pager --no-hostname -o short 2>&1 | tail -%d",
+             n_lines, n_lines);
+    FILE *p = popen(cmd, "r");
+    if (!p) return;
+    int used = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), p)) {
+        int n = (int)strlen(line);
+        if (used + n + 1 >= cap) break;
+        memcpy(out + used, line, n);
+        used += n;
+    }
+    out[used] = 0;
+    pclose(p);
+}
+
 /* ---------- WiFi (asynchrone, via pthread + lv_async_call) ---------- */
 typedef struct {
     wifi_scan_cb_t cb;

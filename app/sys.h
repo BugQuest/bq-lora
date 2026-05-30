@@ -30,6 +30,16 @@ void sys_ssh_set(bool on);
 
 bool sys_hotspot_active(void);
 void sys_hotspot_set(bool on);
+
+/* Rétroéclairage : pourcentage 0..100, lecture via /sys/class/pwm. */
+int  sys_backlight_get(void);
+void sys_backlight_set(int pct);
+
+/* Beep court sur le piezo GPIO17 (asynchrone). */
+void sys_beep(int freq_hz, int duration_ms);
+
+/* Dernières lignes du journal système (journalctl -n N). */
+void sys_log_tail(char *out, int cap, int n_lines);
 /* SSID/passphrase utilisés par le hotspot (constantes affichées à l'écran). */
 #define HOTSPOT_SSID "BugQuest-Lora"
 #define HOTSPOT_PASS "bugquest-lora"

@@ -1,0 +1,13 @@
+[Unit]
+Description=Init PWM retroeclairage (GPIO18)
+DefaultDependencies=no
+After=local-fs.target systemd-modules-load.service
+Before=meshui-splash.service meshui.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/meshui-backlight-init
+
+[Install]
+WantedBy=sysinit.target

@@ -29,6 +29,10 @@ case "$1" in
     hotspot-off)
         exec /usr/bin/nmcli connection down Hotspot
         ;;
+    backlight)
+        # $2 = duty 0..1000000 (la PWM tourne a 1 kHz / periode 1 ms)
+        echo "${2:-1000000}" > /sys/class/pwm/pwmchip0/pwm0/duty_cycle
+        ;;
     wifi-scan)
         exec /usr/bin/nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list --rescan yes
         ;;

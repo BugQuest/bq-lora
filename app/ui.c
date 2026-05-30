@@ -361,6 +361,8 @@ static lv_obj_t *sys_lbl_ssh_state, *sys_lbl_ssh_btn, *sys_btn_ssh;
 static lv_obj_t *sys_lbl_wifi;
 static lv_obj_t *sys_lbl_hot_state, *sys_lbl_hot_btn;
 static lv_obj_t *sys_lbl_usb_state, *sys_lbl_usb_ip;
+static lv_obj_t *sys_log_ta;
+static lv_obj_t *sys_bl_slider, *sys_bl_lbl;
 static lv_timer_t *sys_refresh_timer;
 
 static lv_obj_t *info_row(lv_obj_t *parent, const char *key) {
@@ -415,6 +417,64 @@ static void calib_cb(lv_event_t *e)    { (void)e; calib_start(NULL); }
 static void ssh_toggle_cb(lv_event_t *e) { (void)e; sys_ssh_set(!sys_ssh_running()); }
 
 static void hot_yes(void)        { sys_hotspot_set(!sys_hotspot_active()); }
+static void beep_cb(lv_event_t *e) { (void)e; sys_beep(1500, 120); }
+
+static void bl_slider_cb(lv_event_t *e) {
+    lv_obj_t *s = lv_event_get_target_obj(e);
+    int v = (int)lv_slider_get_value(s);
+    if (sys_bl_lbl) {
+        char b[8]; snprintf(b, sizeof(b), "%d%%", v);
+        lv_label_set_text(sys_bl_lbl, b);
+    }
+    sys_backlight_set(v);
+}
+
+static void log_refresh(lv_obj_t *ta) {
+    static char buf[4096];
+    sys_log_tail(buf, sizeof(buf), 30);
+    lv_textarea_set_text(ta, buf);
+    /* place le curseur en bas pour scroller au dernier message */
+    lv_textarea_set_cursor_pos(ta, LV_TEXTAREA_CURSOR_LAST);
+}
+static void log_refresh_cb(lv_event_t *e) { (void)e; if (sys_log_ta) log_refresh(sys_log_ta); }
+
+/* QR code WiFi du hotspot : ouvre un modal plein écran avec le QR */
+static lv_obj_t *qr_ov;
+static void qr_close_cb(lv_event_t *e) { (void)e; if (qr_ov) { lv_obj_delete(qr_ov); qr_ov = NULL; } }
+static void qr_open_cb(lv_event_t *e) {
+    (void)e;
+    qr_ov = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(qr_ov, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(qr_ov, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_bg_opa(qr_ov, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(qr_ov, 0, 0);
+    lv_obj_set_style_radius(qr_ov, 0, 0);
+    lv_obj_set_style_pad_all(qr_ov, 8, 0);
+    lv_obj_clear_flag(qr_ov, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *t = label(qr_ov, "Scanner pour rejoindre " HOTSPOT_SSID, FONT_SMALL, CY_CYAN);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 0);
+
+    /* WIFI:T:WPA;S:<ssid>;P:<pass>;; */
+    char payload[160];
+    snprintf(payload, sizeof(payload), "WIFI:T:WPA;S:%s;P:%s;;", HOTSPOT_SSID, HOTSPOT_PASS);
+    lv_obj_t *qr = lv_qrcode_create(qr_ov);
+    lv_qrcode_set_size(qr, 260);
+    lv_qrcode_set_dark_color(qr, lv_color_hex(CY_CYAN));
+    lv_qrcode_set_light_color(qr, lv_color_hex(CY_BG));
+    lv_qrcode_update(qr, payload, (int32_t)strlen(payload));
+    lv_obj_align(qr, LV_ALIGN_CENTER, 0, -10);
+
+    char cred[96]; snprintf(cred, sizeof(cred), "SSID  %s\npass  %s", HOTSPOT_SSID, HOTSPOT_PASS);
+    lv_obj_t *c = label(qr_ov, cred, FONT_SMALL, CY_TEXT);
+    lv_obj_align(c, LV_ALIGN_CENTER, 0, 140);
+
+    lv_obj_t *bar = lv_obj_create(qr_ov);
+    lv_obj_set_size(bar, LV_PCT(100), 36);
+    flat(bar); lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(bar, LV_SYMBOL_CLOSE "  FERMER", CY_DIM, qr_close_cb);
+}
 static void hot_toggle_cb(lv_event_t *e) {
     (void)e;
     bool on = sys_hotspot_active();
@@ -558,6 +618,7 @@ static void build_sys(void) {
     lv_obj_center(sys_lbl_hot_btn);
     lv_obj_t *credline = label(s, "SSID: " HOTSPOT_SSID "   pass: " HOTSPOT_PASS, FONT_SMALL, CY_DIM);
     (void)credline;
+    small_button(s, LV_SYMBOL_IMAGE "  QR CODE WIFI", CY_MAGENTA, qr_open_cb);
 
     s = section(col, "USB");
     sys_lbl_usb_state = info_row(s, "etat");
@@ -569,7 +630,55 @@ static void build_sys(void) {
     small_button(s, LV_SYMBOL_REFRESH "  RELANCER MESHUI", CY_CYAN, restart_app_cb);
 
     s = section(col, "ECRAN");
-    small_button(s, LV_SYMBOL_GPS "  CALIBRER L'ECRAN", CY_CYAN, calib_cb);
+    /* Luminosité — slider en % */
+    lv_obj_t *brow = lv_obj_create(s);
+    lv_obj_set_size(brow, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(brow);
+    lv_obj_set_flex_flow(brow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(brow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(brow, LV_OBJ_FLAG_SCROLLABLE);
+    label(brow, "luminosite", FONT_SMALL, CY_DIM);
+    sys_bl_lbl = label(brow, "?%", FONT_SMALL, CY_CYAN);
+    sys_bl_slider = lv_slider_create(s);
+    lv_obj_set_size(sys_bl_slider, LV_PCT(100), 14);
+    lv_slider_set_range(sys_bl_slider, 5, 100);   /* min 5% pour ne pas eteindre */
+    int cur_bl = sys_backlight_get();
+    if (cur_bl < 5) cur_bl = 100;
+    lv_slider_set_value(sys_bl_slider, cur_bl, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(sys_bl_slider, lv_color_hex(CY_PANEL2), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sys_bl_slider, lv_color_hex(CY_CYAN),   LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sys_bl_slider, lv_color_hex(CY_CYAN),   LV_PART_KNOB);
+    lv_obj_set_style_radius(sys_bl_slider, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(sys_bl_slider, 2, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(sys_bl_slider, 2, LV_PART_KNOB);
+    lv_obj_add_event_cb(sys_bl_slider, bl_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    char b0[8]; snprintf(b0, sizeof(b0), "%d%%", cur_bl);
+    lv_label_set_text(sys_bl_lbl, b0);
+
+    /* Actions ecran */
+    lv_obj_t *erow = lv_obj_create(s);
+    lv_obj_set_size(erow, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(erow); lv_obj_set_flex_flow(erow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(erow, 6, 0);
+    lv_obj_clear_flag(erow, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(erow, LV_SYMBOL_AUDIO "  BIP",         CY_MAGENTA, beep_cb);
+    small_button(erow, LV_SYMBOL_GPS   "  CALIBRER",    CY_CYAN,    calib_cb);
+
+    /* Section LOG */
+    s = section(col, "LOG SYSTEME");
+    sys_log_ta = lv_textarea_create(s);
+    lv_obj_set_size(sys_log_ta, LV_PCT(100), 140);
+    lv_textarea_set_one_line(sys_log_ta, false);
+    lv_obj_set_style_bg_color(sys_log_ta, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_text_color(sys_log_ta, lv_color_hex(CY_TEXT), 0);
+    lv_obj_set_style_text_font(sys_log_ta, FONT_SMALL, 0);
+    lv_obj_set_style_border_color(sys_log_ta, lv_color_hex(CY_BORDER), 0);
+    lv_obj_set_style_border_width(sys_log_ta, 1, 0);
+    lv_obj_set_style_radius(sys_log_ta, 2, 0);
+    lv_obj_set_style_pad_all(sys_log_ta, 4, 0);
+    lv_textarea_set_text(sys_log_ta, "");
+    log_refresh(sys_log_ta);
+    small_button(s, LV_SYMBOL_REFRESH "  RAFRAICHIR", CY_CYAN, log_refresh_cb);
 
     sys_refresh(NULL);
     sys_refresh_timer = lv_timer_create(sys_refresh, 5000, NULL);

@@ -14,7 +14,7 @@ echo "=== provision $(date) ==="
 # Dépendances (filet : cloud-init peut planter sur des 404 de mirroir)
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y || true
-apt-get install -y build-essential cmake git python3-pil
+apt-get install -y build-essential cmake git python3-pil python3-gpiozero
 
 # LVGL (v9.2)
 if [ ! -d "$H/lvgl" ]; then
@@ -32,6 +32,7 @@ for f in 12 16 20 28; do
     sed -i -E "s/(#define LV_FONT_MONTSERRAT_$f) +0/\\1 1/" "$SRC/lv_conf.h"
 done
 sed -i -E 's/(#define LV_FONT_UNSCII_16) +0/\1 1/' "$SRC/lv_conf.h"
+sed -i -E 's/(#define LV_USE_QRCODE) +0/\1 1/' "$SRC/lv_conf.h"
 
 chown -R "$U:$U" "$H"
 
@@ -43,6 +44,12 @@ sudo -u "$U" cmake --build "$SRC/build" --target meshui -j2
 install -m 755 "$SRC/deploy/meshui-ctl"      /usr/local/sbin/meshui-ctl
 install -m 440 -o root -g root "$SRC/deploy/meshui-sudoers" /etc/sudoers.d/meshui
 visudo -c -f /etc/sudoers.d/meshui
+
+# Backlight PWM (rétroéclairage écran)
+install -m 755 "$SRC/deploy/backlight-init.sh"   /usr/local/sbin/meshui-backlight-init
+install -m 644 "$SRC/deploy/backlight.service"   /etc/systemd/system/backlight.service
+systemctl enable backlight.service || true
+systemctl start  backlight.service || true
 
 # Gadget USB CDC NCM (compatible Windows 11) via configfs au boot
 install -m 755 "$SRC/deploy/usb-ncm-setup.sh" /usr/local/sbin/meshui-usb-gadget
