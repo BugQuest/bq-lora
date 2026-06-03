@@ -203,6 +203,22 @@ void sys_bt_set(bool on)
     system(cmd);
 }
 
+usb_net_mode_t sys_usb_net_mode(void)
+{
+    char b[16]; run_get("nmcli -g ipv4.method connection show usb0 2>/dev/null", b, sizeof(b));
+    if (strcmp(b, "shared") == 0) return USB_NET_SHARED;
+    if (strcmp(b, "auto")   == 0) return USB_NET_CLIENT;
+    return USB_NET_UNKNOWN;
+}
+
+void sys_usb_net_set(usb_net_mode_t mode)
+{
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), CTL " %s &",
+             mode == USB_NET_CLIENT ? "usb-net-client" : "usb-net-share");
+    system(cmd);
+}
+
 usb_mode_t sys_usb_mode(void)
 {
     if (access("/sys/kernel/config/usb_gadget/bqlora/functions/hid.usb0", F_OK) == 0)

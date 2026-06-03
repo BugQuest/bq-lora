@@ -39,6 +39,15 @@ void sys_wifi_radio_set(bool on);
 bool sys_bt_on(void);
 void sys_bt_set(bool on);
 
+/* Mode reseau du gadget USB :
+ *   SHARED = Pi sert le DHCP (10.42.0.1) ; pas d'internet, le PC se connecte au Pi.
+ *   CLIENT = Pi recoit l'IP via le partage de connexion Windows (ICS) ;
+ *            le Pi peut acceder a internet via le PC.
+ */
+typedef enum { USB_NET_SHARED, USB_NET_CLIENT, USB_NET_UNKNOWN } usb_net_mode_t;
+usb_net_mode_t sys_usb_net_mode(void);
+void sys_usb_net_set(usb_net_mode_t mode);
+
 /* Mode du gadget USB. */
 typedef enum { USB_MODE_NCM, USB_MODE_HID, USB_MODE_STORAGE, USB_MODE_UNKNOWN } usb_mode_t;
 usb_mode_t sys_usb_mode(void);

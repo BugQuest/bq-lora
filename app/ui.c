@@ -352,6 +352,7 @@ static lv_obj_t *hap_lbl_state, *hap_lbl_btn;     /* app HOTSPOT */
 static lv_obj_t *bap_lbl_state, *bap_lbl_btn;     /* app BAD USB */
 static lv_obj_t *bap_btn_ncm, *bap_btn_hid, *bap_btn_storage; /* selecteur 3 modes */
 static lv_obj_t *upd_lbl_state, *upd_lbl_hash, *upd_btn_install; /* MISES A JOUR */
+static lv_obj_t *sys_btn_usb_share, *sys_btn_usb_client;          /* USB > INTERNET */
 static lv_obj_t *sys_log_ta;
 static lv_obj_t *sys_bl_slider, *sys_bl_lbl;
 static lv_timer_t *sys_refresh_timer;
@@ -420,6 +421,20 @@ static void wifi_radio_toggle_cb(lv_event_t *e) {
 
 static void bt_yes(void) { sys_bt_set(!sys_bt_on()); }
 static void bt_toggle_cb(lv_event_t *e) { (void)e; bt_yes(); }
+
+/* USB > INTERNET : Pi sert le DHCP OU Pi recoit l'IP via ICS Windows */
+static void usb_net_share_yes(void)  { sys_usb_net_set(USB_NET_SHARED); }
+static void usb_net_client_yes(void) { sys_usb_net_set(USB_NET_CLIENT); }
+static void usb_net_share_cb(lv_event_t *e) {
+    (void)e;
+    if (sys_usb_net_mode() == USB_NET_SHARED) return;
+    confirm_dialog("Pi serveur DHCP USB ?\n(pas d'internet sur Pi)", usb_net_share_yes);
+}
+static void usb_net_client_cb(lv_event_t *e) {
+    (void)e;
+    if (sys_usb_net_mode() == USB_NET_CLIENT) return;
+    confirm_dialog("Recevoir internet du PC ?\n(active d'abord l'ICS Windows)", usb_net_client_yes);
+}
 
 /* ----- Mises a jour OTA ----- */
 static void upd_check_done_cb(bool avail, const char *loc, const char *rem, void *u) {
@@ -916,6 +931,13 @@ static void sys_refresh(lv_timer_t *t) {
             lv_color_hex(usb_up ? CY_GREEN : CY_DIM), 0);
         lv_label_set_text(sys_lbl_usb_ip, i.ip_usb);
     }
+    if (sys_btn_usb_share && sys_btn_usb_client) {
+        usb_net_mode_t un = sys_usb_net_mode();
+        lv_obj_set_style_bg_opa(sys_btn_usb_share,
+            un == USB_NET_SHARED ? LV_OPA_80 : LV_OPA_20, 0);
+        lv_obj_set_style_bg_opa(sys_btn_usb_client,
+            un == USB_NET_CLIENT ? LV_OPA_80 : LV_OPA_20, 0);
+    }
 }
 
 static void build_sys(void) {
@@ -990,6 +1012,16 @@ static void build_sys(void) {
     sys_lbl_usb_ip    = info_row(s, "ip Pi");
     lv_obj_t *usbhint = label(s, "Brancher PC sur le port USB (milieu) du Pi", FONT_SMALL, CY_DIM);
     (void)usbhint;
+
+    /* USB > INTERNET : choisir qui sert le DHCP (Pi ou PC via ICS) */
+    label(s, "internet :", FONT_SMALL, CY_DIM);
+    lv_obj_t *unrow = lv_obj_create(s);
+    lv_obj_set_size(unrow, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(unrow); lv_obj_set_flex_flow(unrow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(unrow, 6, 0);
+    lv_obj_clear_flag(unrow, LV_OBJ_FLAG_SCROLLABLE);
+    sys_btn_usb_share  = small_button(unrow, "PARTAGE Pi",  CY_CYAN,  usb_net_share_cb);
+    sys_btn_usb_client = small_button(unrow, "CLIENT (ICS)", CY_AMBER, usb_net_client_cb);
 
     s = section(col, "REGLAGES");
     small_button(s, LV_SYMBOL_SETTINGS "  MODIFIER", CY_CYAN, settings_modal_open_e);
@@ -1268,6 +1300,7 @@ static void show_tab(int app) {
     bap_btn_ncm = NULL; bap_btn_hid = NULL; bap_btn_storage = NULL;
     bap_list_obj = NULL; bap_lbl_path = NULL;
     upd_lbl_state = NULL; upd_lbl_hash = NULL; upd_btn_install = NULL;
+    sys_btn_usb_share = NULL; sys_btn_usb_client = NULL;
     sys_log_ta = NULL;
     sys_bl_slider = NULL; sys_bl_lbl = NULL;
     compose_ta   = NULL;
