@@ -149,6 +149,9 @@ def press(fd, mod, code):
 
 def type_char(fd, c):
     if layout == 'fr':
+        if c in FR_ALTGR_NUMPAD:
+            type_alt_code(fd, FR_ALTGR_NUMPAD[c])
+            return
         if c in HID_FR:
             m, k = HID_FR[c]; press(fd, m, k)
         return
@@ -168,19 +171,31 @@ def type_string(fd, s):
         type_char(fd, c)
         time.sleep(str_delay_ms / 1000.0)
 
+def type_alt_code(fd, code):
+    """Tape un caractere via ALT + numpad (ex: 96 = ` ). Necessite NumLock ON."""
+    send_report(fd, ALT, [])
+    for d in str(code):
+        n = int(d)
+        kp = 98 if n == 0 else (89 + n - 1)   # KP_0=98, KP_1=89..KP_9=97
+        send_report(fd, ALT, [kp])
+        send_report(fd, ALT, [])
+        time.sleep(0.008)
+    send_report(fd, 0, [])    # release Alt -> Windows insere le char
+    time.sleep(0.02)
+
 def type_alt(fd, s):
     """ALT+numpad : tape la valeur decimale ASCII de chaque char."""
     for c in s:
-        code = ord(c) % 1000
-        send_report(fd, ALT, [])
-        for d in str(code):
-            n = int(d)
-            kp = 98 if n == 0 else (89 + (n - 1))
-            send_report(fd, ALT, [kp])
-            send_report(fd, ALT, [])
-            time.sleep(0.012)
-        send_report(fd, 0, [])
-        time.sleep(0.03)
+        type_alt_code(fd, ord(c) % 1000)
+
+# Caracteres AZERTY qui passent par AltGr et sont peu fiables en HID
+# (Windows n'interprete pas toujours Ctrl+Alt + touche comme AltGr).
+# On les tape via Alt+numpad qui marche partout si NumLock est ON.
+FR_ALTGR_NUMPAD = {
+    '@': 64,  '#': 35,  '{': 123, '[': 91,
+    '|': 124, '`': 96,  '\\': 92, '^': 94,
+    '~': 126, ']': 93,  '}': 125,
+}
 
 def resolve_combo(tokens):
     mod = 0; code = 0
