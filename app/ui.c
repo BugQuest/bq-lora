@@ -96,17 +96,12 @@ static void topbar_refresh(lv_timer_t *t) {
     lv_label_set_text(tb_clock, b);
 
     bool usb_up = usb_client_connected();
-    if (usb_up) lv_obj_clear_flag(tb_usb, LV_OBJ_FLAG_HIDDEN);
-    else        lv_obj_add_flag(tb_usb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_text_color(tb_usb, lv_color_hex(usb_up ? CY_CYAN : CY_BORDER), 0);
 
     bool wifi_up = read_int_file("/sys/class/net/wlan0/carrier") == 1;
-    if (wifi_up) {
-        lv_obj_clear_flag(tb_wifi, LV_OBJ_FLAG_HIDDEN);
-        bool ap = sys_hotspot_active();
-        lv_obj_set_style_text_color(tb_wifi, lv_color_hex(ap ? CY_MAGENTA : CY_CYAN), 0);
-    } else {
-        lv_obj_add_flag(tb_wifi, LV_OBJ_FLAG_HIDDEN);
-    }
+    bool ap = sys_hotspot_active();
+    uint32_t wcol = ap ? CY_MAGENTA : (wifi_up ? CY_CYAN : CY_BORDER);
+    lv_obj_set_style_text_color(tb_wifi, lv_color_hex(wcol), 0);
 }
 
 static void build_topbar(lv_obj_t *parent) {
@@ -151,10 +146,9 @@ static void build_topbar(lv_obj_t *parent) {
     lv_obj_align(right, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_clear_flag(right, LV_OBJ_FLAG_SCROLLABLE);
 
-    tb_usb = label(right, LV_SYMBOL_USB, FONT_SMALL, CY_CYAN);
-    lv_obj_add_flag(tb_usb, LV_OBJ_FLAG_HIDDEN);
-    tb_wifi = label(right, LV_SYMBOL_WIFI, FONT_SMALL, CY_CYAN);
-    lv_obj_add_flag(tb_wifi, LV_OBJ_FLAG_HIDDEN);
+    /* Icones toujours visibles, color = etat (dim si decoonnecte) */
+    tb_usb = label(right, LV_SYMBOL_USB, FONT_SMALL, CY_BORDER);
+    tb_wifi = label(right, LV_SYMBOL_WIFI, FONT_SMALL, CY_BORDER);
     tb_clock = label(right, "--:--", FONT_MONO, CY_TEXT);
 }
 
@@ -357,6 +351,7 @@ static lv_obj_t *sys_lbl_usb_mode_state, *sys_lbl_usb_mode_btn;
 static lv_obj_t *hap_lbl_state, *hap_lbl_btn;     /* app HOTSPOT */
 static lv_obj_t *bap_lbl_state, *bap_lbl_btn;     /* app BAD USB */
 static lv_obj_t *bap_btn_ncm, *bap_btn_hid, *bap_btn_storage; /* selecteur 3 modes */
+static lv_obj_t *upd_lbl_state, *upd_lbl_hash, *upd_btn_install; /* MISES A JOUR */
 static lv_obj_t *sys_log_ta;
 static lv_obj_t *sys_bl_slider, *sys_bl_lbl;
 static lv_timer_t *sys_refresh_timer;
@@ -425,6 +420,43 @@ static void wifi_radio_toggle_cb(lv_event_t *e) {
 
 static void bt_yes(void) { sys_bt_set(!sys_bt_on()); }
 static void bt_toggle_cb(lv_event_t *e) { (void)e; bt_yes(); }
+
+/* ----- Mises a jour OTA ----- */
+static void upd_check_done_cb(bool avail, const char *loc, const char *rem, void *u) {
+    (void)u;
+    if (!upd_lbl_state) return;
+    char b[64];
+    snprintf(b, sizeof(b), "local %s   distant %s", loc, rem);
+    if (upd_lbl_hash) lv_label_set_text(upd_lbl_hash, b);
+    lv_label_set_text(upd_lbl_state,
+        avail ? "mise a jour disponible" : "a jour");
+    lv_obj_set_style_text_color(upd_lbl_state,
+        lv_color_hex(avail ? CY_AMBER : CY_GREEN), 0);
+    if (upd_btn_install) {
+        if (avail) lv_obj_clear_flag(upd_btn_install, LV_OBJ_FLAG_HIDDEN);
+        else       lv_obj_add_flag(upd_btn_install, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+static void upd_check_cb(lv_event_t *e) {
+    (void)e;
+    if (upd_lbl_state) {
+        lv_label_set_text(upd_lbl_state, "verification...");
+        lv_obj_set_style_text_color(upd_lbl_state, lv_color_hex(CY_CYAN), 0);
+    }
+    sys_update_check_async(upd_check_done_cb, NULL);
+}
+static void upd_apply_done_cb(bool ok, void *u) { (void)ok; (void)u; }
+static void upd_apply_yes(void) {
+    if (upd_lbl_state) {
+        lv_label_set_text(upd_lbl_state, "installation...");
+        lv_obj_set_style_text_color(upd_lbl_state, lv_color_hex(CY_MAGENTA), 0);
+    }
+    sys_update_apply_async(upd_apply_done_cb, NULL);
+}
+static void upd_apply_cb(lv_event_t *e) {
+    (void)e;
+    confirm_dialog("Installer la maj ?\n(meshui redemarrera)", upd_apply_yes);
+}
 
 /* ----- BAD USB ----- */
 #define BADUSB_DIR "/home/bq-lora/meshui/badusb"
@@ -966,6 +998,21 @@ static void build_sys(void) {
     s = section(col, "APPLICATION");
     small_button(s, LV_SYMBOL_REFRESH "  RELANCER MESHUI", CY_CYAN, restart_app_cb);
 
+    /* MISES A JOUR (git pull + rebuild + restart, depuis github) */
+    s = section(col, "MISES A JOUR");
+    upd_lbl_state = label(s, "?", FONT_BODY, CY_DIM);
+    upd_lbl_hash  = label(s, "-", FONT_SMALL, CY_DIM);
+    lv_obj_t *urow = lv_obj_create(s);
+    lv_obj_set_size(urow, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(urow); lv_obj_set_flex_flow(urow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(urow, 6, 0);
+    lv_obj_clear_flag(urow, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(urow, LV_SYMBOL_REFRESH "  VERIFIER", CY_CYAN,  upd_check_cb);
+    upd_btn_install = small_button(urow, LV_SYMBOL_DOWNLOAD "  INSTALLER", CY_MAGENTA, upd_apply_cb);
+    lv_obj_add_flag(upd_btn_install, LV_OBJ_FLAG_HIDDEN);
+    /* auto-check au chargement de la page */
+    upd_check_cb(NULL);
+
     s = section(col, "ECRAN");
     /* Luminosité — slider en % */
     lv_obj_t *brow = lv_obj_create(s);
@@ -1220,6 +1267,7 @@ static void show_tab(int app) {
     bap_lbl_state = NULL; bap_lbl_btn = NULL;
     bap_btn_ncm = NULL; bap_btn_hid = NULL; bap_btn_storage = NULL;
     bap_list_obj = NULL; bap_lbl_path = NULL;
+    upd_lbl_state = NULL; upd_lbl_hash = NULL; upd_btn_install = NULL;
     sys_log_ta = NULL;
     sys_bl_slider = NULL; sys_bl_lbl = NULL;
     compose_ta   = NULL;

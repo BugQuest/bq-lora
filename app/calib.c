@@ -7,7 +7,7 @@
 #define NPT 5
 #define SCR_W 320
 #define SCR_H 480
-#define MARGIN 30
+#define MARGIN 0
 
 static const int targets[NPT][2] = {
     { MARGIN,         MARGIN         },

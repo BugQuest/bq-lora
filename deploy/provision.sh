@@ -42,8 +42,18 @@ sudo -u "$U" cmake --build "$SRC/build" --target meshui -j2
 
 # Helper privilégié + sudoers NOPASSWD limités (pour les contrôles dans l'UI)
 install -m 755 "$SRC/deploy/meshui-ctl"      /usr/local/sbin/meshui-ctl
+install -m 755 "$SRC/deploy/meshui-update.sh" /usr/local/sbin/meshui-update
 install -m 440 -o root -g root "$SRC/deploy/meshui-sudoers" /etc/sudoers.d/meshui
 visudo -c -f /etc/sudoers.d/meshui
+
+# Init le repo git pour les mises a jour OTA depuis l'UI
+cd "$SRC"
+if [ ! -d .git ]; then
+    sudo -u "$U" git init -q -b master
+    sudo -u "$U" git remote add origin https://github.com/BugQuest/bq-lora.git
+    sudo -u "$U" git fetch -q origin master || true
+    sudo -u "$U" git reset --hard origin/master >/dev/null 2>&1 || true
+fi
 
 # Backlight PWM (rétroéclairage écran)
 install -m 755 "$SRC/deploy/backlight-init.sh"   /usr/local/sbin/meshui-backlight-init

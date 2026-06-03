@@ -63,6 +63,16 @@ void sys_beep(int freq_hz, int duration_ms);
 /* Dernières lignes du journal système (journalctl -n N). */
 void sys_log_tail(char *out, int cap, int n_lines);
 
+/* Mise à jour OTA via git pull depuis https://github.com/BugQuest/bq-lora. */
+typedef void (*update_check_cb_t)(bool update_available,
+                                  const char *local_short,
+                                  const char *remote_short,
+                                  void *user);
+void sys_update_check_async(update_check_cb_t cb, void *user);
+
+typedef void (*update_apply_cb_t)(bool ok, void *user);
+void sys_update_apply_async(update_apply_cb_t cb, void *user);
+
 /* WiFi : scan + connexion asynchrones. Les callbacks sont rappelés sur le thread UI. */
 typedef struct {
     char ssid[64];

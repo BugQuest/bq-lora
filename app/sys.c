@@ -291,6 +291,61 @@ void sys_beep(int freq_hz, int duration_ms)
     system(cmd);
 }
 
+#define REPO "/home/bq-lora/meshui"
+
+typedef struct {
+    update_check_cb_t cb;
+    void *user;
+    char local[16], remote[16];
+    bool available;
+} upd_ctx_t;
+
+static void upd_check_deliver(void *a)
+{
+    upd_ctx_t *c = a;
+    if (c->cb) c->cb(c->available, c->local, c->remote, c->user);
+    free(c);
+}
+
+static void *upd_check_thread(void *a)
+{
+    upd_ctx_t *c = a;
+    /* fetch silencieux (peut echouer si pas d'internet) */
+    system("git -C " REPO " fetch -q origin master 2>/dev/null");
+    run_get("git -C " REPO " rev-parse --short HEAD 2>/dev/null", c->local, sizeof(c->local));
+    run_get("git -C " REPO " rev-parse --short origin/master 2>/dev/null", c->remote, sizeof(c->remote));
+    if (!c->local[0])  strncpy(c->local,  "?", sizeof(c->local));
+    if (!c->remote[0]) strncpy(c->remote, "?", sizeof(c->remote));
+    c->available = (c->local[0] != '?' && c->remote[0] != '?' && strcmp(c->local, c->remote) != 0);
+    lv_async_call(upd_check_deliver, c);
+    return NULL;
+}
+
+void sys_update_check_async(update_check_cb_t cb, void *user)
+{
+    upd_ctx_t *c = calloc(1, sizeof(*c));
+    c->cb = cb; c->user = user;
+    pthread_t t; pthread_create(&t, NULL, upd_check_thread, c); pthread_detach(t);
+}
+
+typedef struct { update_apply_cb_t cb; void *user; bool ok; } upd_apply_ctx_t;
+static void upd_apply_deliver(void *a) { upd_apply_ctx_t *c = a; if (c->cb) c->cb(c->ok, c->user); free(c); }
+static void *upd_apply_thread(void *a)
+{
+    upd_apply_ctx_t *c = a;
+    /* meshui-ctl update fait pull + build + restart (privilegies). Le restart
+     * tuera ce process avant le callback ; on signale just before. */
+    c->ok = (system(CTL " update") == 0);
+    lv_async_call(upd_apply_deliver, c);
+    return NULL;
+}
+void sys_update_apply_async(update_apply_cb_t cb, void *user)
+{
+    upd_apply_ctx_t *c = calloc(1, sizeof(*c));
+    c->cb = cb; c->user = user;
+    pthread_t t; pthread_create(&t, NULL, upd_apply_thread, c); pthread_detach(t);
+}
+
 void sys_log_tail(char *out, int cap, int n_lines)
 {
     out[0] = 0;
