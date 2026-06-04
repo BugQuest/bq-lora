@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <strings.h>
+#include <ctype.h>
 
 /* ---------------------------------------------------------------- état */
 /* IDs d'app (cur_tab garde son nom mais sémantique = app courante) */
@@ -902,16 +903,87 @@ static void set_modal_close(void) {
     lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
 }
 
+/* Recopie src dans dst en retirant les espaces de début/fin. dst de taille cap. */
+static void str_trim(const char *src, char *dst, size_t cap) {
+    while (*src && isspace((unsigned char)*src)) src++;
+    size_t n = strlen(src);
+    while (n > 0 && isspace((unsigned char)src[n - 1])) n--;
+    if (n >= cap) n = cap - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+/* Valide le nom long du nœud : 1 à 39 caractères imprimables (la limite
+ * firmware Meshtastic est ~40 octets pour long_name). Refuse vide/espaces. */
+static bool node_name_valid(const char *s) {
+    size_t n = strlen(s);
+    if (n < 1 || n > 39) return false;
+    for (const char *p = s; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c < 0x20 || c == 0x7f) return false;   /* pas de caractères de contrôle */
+    }
+    return true;
+}
+
+/* Dérive un nom court (≤4 car.) à partir du nom long : initiales des mots si
+ * plusieurs mots, sinon les 4 premiers caractères. Résultat en majuscules. */
+static void derive_short_name(const char *longn, char *out, size_t cap) {
+    char ini[8]; size_t k = 0;
+    bool prev_sp = true;
+    for (const char *p = longn; *p && k < 4; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (isspace(c)) { prev_sp = true; continue; }
+        if (prev_sp && isalnum(c)) ini[k++] = (char)toupper(c);
+        prev_sp = false;
+    }
+    if (k >= 2) {                       /* plusieurs mots -> initiales */
+        ini[k] = '\0';
+    } else {                            /* un seul mot -> 4 premiers car. */
+        k = 0;
+        for (const char *p = longn; *p && k < 4; p++) {
+            unsigned char c = (unsigned char)*p;
+            if (!isspace(c)) ini[k++] = (char)toupper(c);
+        }
+        ini[k] = '\0';
+    }
+    if (k == 0) { ini[0] = '?'; ini[1] = '\0'; }
+    size_t n = strlen(ini);
+    if (n >= cap) n = cap - 1;
+    memcpy(out, ini, n);
+    out[n] = '\0';
+}
+
 static void set_save_cb_e(lv_event_t *e) {
     (void)e;
-    settings_set_node_name   (lv_textarea_get_text(set_ta_node));
+    char name[48];
+    str_trim(lv_textarea_get_text(set_ta_node), name, sizeof(name));
+    if (!node_name_valid(name)) {
+        confirm_dialog("Nom de noeud invalide.\n1 a 39 caracteres, sans espaces\nen debut/fin.", NULL);
+        return;                          /* garde le modal ouvert */
+    }
+
+    bool name_changed = strcmp(name, settings_node_name()) != 0;
+
+    settings_set_node_name   (name);
     settings_set_hotspot_ssid(lv_textarea_get_text(set_ta_ssid));
     settings_set_hotspot_pass(lv_textarea_get_text(set_ta_pass));
     const char *tz = lv_textarea_get_text(set_ta_tz);
     settings_set_timezone(tz);
     settings_save();
     sys_set_timezone(tz);
+
+    /* Pousse le nouveau nom sur le mesh (AdminMessage set_owner). */
+    bool offline = false;
+    if (name_changed) {
+        char shortn[8];
+        derive_short_name(name, shortn, sizeof(shortn));
+        if (!mesh_set_owner(name, shortn))
+            offline = true;
+    }
+
     set_modal_close();
+    if (offline)
+        confirm_dialog("Nom enregistre localement.\nMESH inactif : le nom radio\nsera pousse a la reconnexion.", NULL);
 }
 static void set_cancel_cb_e(lv_event_t *e) { (void)e; set_modal_close(); }
 

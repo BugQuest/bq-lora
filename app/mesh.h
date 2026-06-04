@@ -72,6 +72,11 @@ const char *mesh_channel_share_url(int i);
 /* Importe le(s) canal(aux) d'une URL collée. Retourne le nombre ajouté, -1 si URL invalide. */
 int  mesh_channel_import_url(const char *url);
 
+/* Renomme le nœud local sur le mesh (AdminMessage set_owner). long_name = nom
+ * complet diffusé aux autres nœuds ; short_name = 1 à 4 caractères. Nécessite la
+ * liaison active. Retourne false si nœud non prêt ou long_name vide. */
+bool mesh_set_owner(const char *long_name, const char *short_name);
+
 int                 mesh_node_count(void);
 const mesh_node_t  *mesh_node(int i);
 

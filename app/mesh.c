@@ -1039,3 +1039,28 @@ int mesh_channel_import_url(const char *url)
     if (added) { admin_flag(65); schedule_reload(); }
     return added;
 }
+
+/* AdminMessage{ set_owner(32): User{ id(1), long_name(2), short_name(3) } } */
+bool mesh_set_owner(const char *long_name, const char *short_name)
+{
+    if (!mesh_connected() || !long_name || !long_name[0]) return false;
+
+    char id[12];
+    snprintf(id, sizeof(id), "!%08x", s_my_num);
+
+    uint8_t usr[120];
+    pb_writer uw; pb_writer_init(&uw, usr, sizeof(usr));
+    pb_field_bytes(&uw, 1, (const uint8_t *)id, strlen(id));
+    pb_field_bytes(&uw, 2, (const uint8_t *)long_name, strlen(long_name));
+    if (short_name && short_name[0])
+        pb_field_bytes(&uw, 3, (const uint8_t *)short_name, strlen(short_name));
+
+    uint8_t am[160];
+    pb_writer aw; pb_writer_init(&aw, am, sizeof(am));
+    pb_field_bytes(&aw, 32, usr, uw.len);
+    if (uw.ovf || aw.ovf) return false;
+
+    send_admin(am, aw.len);
+    schedule_reload();          /* re-handshake -> le nouveau User revient ~1 s plus tard */
+    return true;
+}
