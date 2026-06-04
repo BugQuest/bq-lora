@@ -12,6 +12,8 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <dirent.h>
+#include <strings.h>
 
 #define CTL "/usr/bin/sudo /usr/local/sbin/meshui-ctl"
 
@@ -482,6 +484,72 @@ void sys_cam_stream_stop(void)
 bool sys_cam_stream_active(void)
 {
     return cam_stream_run != 0;
+}
+
+/* ---------- Camera : galerie ---------- */
+int sys_cam_photo_list(char paths[][256], int max)
+{
+    DIR *d = opendir(PHOTO_DIR);
+    if (!d) return 0;
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) && n < max) {
+        const char *nm = e->d_name;
+        size_t l = strlen(nm);
+        if (l < 5 || strcasecmp(nm + l - 4, ".jpg") != 0) continue;
+        snprintf(paths[n], 256, PHOTO_DIR "/%s", nm);
+        n++;
+    }
+    closedir(d);
+    /* tri decroissant : noms cam_YYYYMMDD_HHMMSS triables lexicalement
+     * -> les plus recents en premier */
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+            if (strcmp(paths[j], paths[i]) > 0) {
+                char tmp[256];
+                strcpy(tmp, paths[i]); strcpy(paths[i], paths[j]); strcpy(paths[j], tmp);
+            }
+    return n;
+}
+
+void sys_cam_photo_delete(const char *path)
+{
+    if (path && *path) unlink(path);
+}
+
+typedef struct {
+    cam_preview_cb_t cb; void *user;
+    int  w, h;
+    char jpg[256], preview[256];
+    bool ok;
+} campv_ctx_t;
+
+static void campv_deliver(void *a)
+{
+    campv_ctx_t *c = a;
+    if (c->cb) c->cb(c->ok, c->preview, c->user);
+    free(c);
+}
+
+static void *campv_thread(void *a)
+{
+    campv_ctx_t *c = a; char cmd[768];
+    strncpy(c->preview, CAM_PREVIEW, sizeof(c->preview) - 1);
+    snprintf(cmd, sizeof(cmd),
+             "/usr/bin/python3 /home/bq-lora/meshui/tools/cam.py '%s' '%s' %d %d "
+             ">/dev/null 2>&1", c->jpg, c->preview, c->w, c->h);
+    c->ok = (system(cmd) == 0);
+    lv_async_call(campv_deliver, c);
+    return NULL;
+}
+
+void sys_cam_preview_async(const char *jpg_path, int w, int h,
+                           cam_preview_cb_t cb, void *user)
+{
+    campv_ctx_t *c = calloc(1, sizeof(*c));
+    c->cb = cb; c->user = user; c->w = w; c->h = h;
+    strncpy(c->jpg, jpg_path, sizeof(c->jpg) - 1);
+    pthread_t t; pthread_create(&t, NULL, campv_thread, c); pthread_detach(t);
 }
 
 #define PWM_DUTY   "/sys/class/pwm/pwmchip0/pwm0/duty_cycle"

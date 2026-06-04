@@ -28,6 +28,7 @@ enum {
     APP_BT      = 7,
     APP_ABOUT   = 8,
     APP_CAMERA  = 9,
+    APP_GALLERY = 10,
 };
 
 static lv_obj_t *content;          /* zone centrale, reconstruite par app */
@@ -1988,13 +1989,17 @@ static void build_hotspot_app(void);
 static void build_badusb_app(void);
 static void build_about(void);
 static void build_camera(void);
+static void build_gallery(void);
 static lv_obj_t *cam_canvas, *cam_status, *cam_btn;   /* fwd : nullifies au changement d'onglet */
+static lv_obj_t *gal_canvas, *gal_status, *gal_del_btn, *gal_prev_btn, *gal_next_btn;
 
 static void show_tab(int app) {
     if (sys_refresh_timer) { lv_timer_delete(sys_refresh_timer); sys_refresh_timer = NULL; }
     /* arrete le flux camera live et oublie ses widgets avant de nettoyer content */
     sys_cam_stream_stop();
     cam_canvas = NULL; cam_status = NULL; cam_btn = NULL;
+    gal_canvas = NULL; gal_status = NULL;
+    gal_del_btn = NULL; gal_prev_btn = NULL; gal_next_btn = NULL;
     /* null tous les pointeurs vers des labels qu'on s'apprete a liberer */
     sys_lbl_host = NULL;
     sys_lbl_wifi = NULL;
@@ -2041,6 +2046,7 @@ static void show_tab(int app) {
         case APP_BADUSB:  build_badusb_app();    break;
         case APP_ABOUT:   build_about();         break;
         case APP_CAMERA:  build_camera();        break;
+        case APP_GALLERY: build_gallery();       break;
         case APP_WIFI:
             /* WIFI = modal flottant ; on reste conceptuellement sur HOME */
             cur_tab = APP_HOME;
@@ -2435,6 +2441,12 @@ static void cam_capture_done(bool ok, const char *photo,
     cam_stream_resume();   /* le live reprend (si on est toujours sur la page) */
 }
 
+static void cam_gallery_cb(lv_event_t *e) {
+    (void)e;
+    if (cam_busy) return;          /* pas pendant une capture */
+    show_tab(APP_GALLERY);
+}
+
 static void cam_capture_cb(lv_event_t *e) {
     (void)e;
     if (cam_busy) return;
@@ -2488,11 +2500,133 @@ static void build_camera(void) {
     lv_obj_set_style_pad_column(row, 6, 0);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     cam_btn = small_button(row, LV_SYMBOL_IMAGE "  CAPTURE", CY_GREEN, cam_capture_cb);
+    small_button(row, LV_SYMBOL_LIST "  GALERIE", CY_CYAN, cam_gallery_cb);
 
     cam_busy = false;
 
     /* demarre le viewfinder live */
     sys_cam_stream_start(cam_pv_buf, CAM_PV_W, CAM_PV_H, cam_frame_cb, NULL);
+}
+
+/* ---------------------------------------------------------------- app GALERIE */
+/* Parcours des photos de ~/meshui/photos/. Chaque photo selectionnee est
+ * convertie en preview RGB565 (cam.py) puis affichee dans un canvas, comme la
+ * capture. Navigation precedent/suivant (cyclique) + suppression confirmee. */
+#define GAL_MAX 128
+static char      gal_paths[GAL_MAX][256];
+static int       gal_n, gal_idx;
+static uint8_t   gal_buf[CAM_PV_W * CAM_PV_H * 2] __attribute__((aligned(4)));
+
+static void gal_set_nav(bool on) {
+    if (gal_prev_btn) { if (on) lv_obj_clear_state(gal_prev_btn, LV_STATE_DISABLED);
+                        else    lv_obj_add_state(gal_prev_btn, LV_STATE_DISABLED); }
+    if (gal_next_btn) { if (on) lv_obj_clear_state(gal_next_btn, LV_STATE_DISABLED);
+                        else    lv_obj_add_state(gal_next_btn, LV_STATE_DISABLED); }
+    if (gal_del_btn)  { if (on) lv_obj_clear_state(gal_del_btn,  LV_STATE_DISABLED);
+                        else    lv_obj_add_state(gal_del_btn,  LV_STATE_DISABLED); }
+}
+
+static void gal_preview_done(bool ok, const char *preview, void *user) {
+    (void)user;
+    if (!gal_canvas) return;
+    if (ok) {
+        FILE *f = fopen(preview, "rb");
+        if (f) {
+            size_t got = fread(gal_buf, 1, sizeof(gal_buf), f);
+            fclose(f);
+            if (got == sizeof(gal_buf)) { lv_obj_invalidate(gal_canvas); return; }
+        }
+    }
+    lv_canvas_fill_bg(gal_canvas, lv_color_black(), LV_OPA_COVER);
+}
+
+static void gal_show(int idx) {
+    if (gal_n <= 0) {
+        if (gal_canvas) lv_canvas_fill_bg(gal_canvas, lv_color_black(), LV_OPA_COVER);
+        if (gal_status) {
+            lv_label_set_text(gal_status, "aucune photo");
+            lv_obj_set_style_text_color(gal_status, lv_color_hex(CY_DIM), 0);
+        }
+        gal_set_nav(false);
+        return;
+    }
+    if (idx < 0)        idx = gal_n - 1;
+    else if (idx >= gal_n) idx = 0;
+    gal_idx = idx;
+
+    const char *p = gal_paths[gal_idx];
+    const char *base = strrchr(p, '/');
+    char b[96];
+    snprintf(b, sizeof(b), "%s  (%d/%d)", base ? base + 1 : p, gal_idx + 1, gal_n);
+    if (gal_status) {
+        lv_label_set_text(gal_status, b);
+        lv_obj_set_style_text_color(gal_status, lv_color_hex(CY_TEXT), 0);
+    }
+    gal_set_nav(true);
+    sys_cam_preview_async(p, CAM_PV_W, CAM_PV_H, gal_preview_done, NULL);
+}
+
+static void gal_prev_cb(lv_event_t *e) { (void)e; gal_show(gal_idx - 1); }
+static void gal_next_cb(lv_event_t *e) { (void)e; gal_show(gal_idx + 1); }
+
+static void gal_delete_yes(void) {
+    if (gal_n <= 0 || !gal_canvas) return;
+    sys_cam_photo_delete(gal_paths[gal_idx]);
+    gal_n = sys_cam_photo_list(gal_paths, GAL_MAX);
+    gal_show(gal_idx);          /* gal_show borne l'index */
+}
+
+static void gal_del_cb(lv_event_t *e) {
+    (void)e;
+    if (gal_n <= 0) return;
+    confirm_dialog("Supprimer cette photo ?", gal_delete_yes);
+}
+
+static void build_gallery(void) {
+    gal_canvas = NULL; gal_status = NULL;
+    gal_del_btn = NULL; gal_prev_btn = NULL; gal_next_btn = NULL;
+
+    lv_obj_t *col = lv_obj_create(content);
+    lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
+    flat(col);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(col, 10, 0);
+    lv_obj_set_style_pad_row(col, 10, 0);
+    lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+
+    label(col, "GALERIE", FONT_BIG, CY_CYAN);
+
+    lv_obj_t *frame = lv_obj_create(col);
+    lv_obj_set_size(frame, CAM_PV_W + 6, CAM_PV_H + 6);
+    panel(frame, CY_BORDER);
+    lv_obj_set_style_pad_all(frame, 2, 0);
+    lv_obj_clear_flag(frame, LV_OBJ_FLAG_SCROLLABLE);
+
+    gal_canvas = lv_canvas_create(frame);
+    lv_canvas_set_buffer(gal_canvas, gal_buf, CAM_PV_W, CAM_PV_H,
+                         LV_COLOR_FORMAT_RGB565);
+    lv_obj_center(gal_canvas);
+    lv_canvas_fill_bg(gal_canvas, lv_color_black(), LV_OPA_COVER);
+
+    gal_status = label(col, "...", FONT_SMALL, CY_DIM);
+    lv_obj_set_width(gal_status, LV_PCT(100));
+    lv_label_set_long_mode(gal_status, LV_LABEL_LONG_DOT);
+
+    lv_obj_t *row = lv_obj_create(col);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(row);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, 6, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    gal_prev_btn = small_button(row, LV_SYMBOL_LEFT,  CY_CYAN,    gal_prev_cb);
+    gal_del_btn  = small_button(row, LV_SYMBOL_TRASH, CY_MAGENTA, gal_del_cb);
+    gal_next_btn = small_button(row, LV_SYMBOL_RIGHT, CY_CYAN,    gal_next_cb);
+
+    gal_n = sys_cam_photo_list(gal_paths, GAL_MAX);
+    gal_idx = 0;
+    gal_show(0);
 }
 
 /* ---------------------------------------------------------------- splash */

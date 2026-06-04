@@ -82,6 +82,17 @@ void sys_cam_stream_start(uint8_t *buf, int w, int h,
 void sys_cam_stream_stop(void);
 bool sys_cam_stream_active(void);
 
+/* Galerie : remplit 'paths' (chemins absolus des .jpg de ~/meshui/photos/,
+ * les plus recents d'abord) et retourne le nombre ecrit (au plus 'max'). */
+int  sys_cam_photo_list(char paths[][256], int max);
+/* Supprime une photo (unlink). */
+void sys_cam_photo_delete(const char *path);
+/* Genere de facon asynchrone une preview RGB565 (w*h) d'un JPEG existant.
+ * Le callback est rappele sur le thread UI ; la preview est dans 'preview_path'. */
+typedef void (*cam_preview_cb_t)(bool ok, const char *preview_path, void *user);
+void sys_cam_preview_async(const char *jpg_path, int w, int h,
+                           cam_preview_cb_t cb, void *user);
+
 /* Change le fuseau horaire systeme (timedatectl set-timezone). */
 void sys_set_timezone(const char *tz);
 
