@@ -100,3 +100,24 @@ void sys_wifi_scan_async(wifi_scan_cb_t cb, void *user);
 typedef void (*wifi_connect_cb_t)(bool ok, const char *msg, void *user);
 void sys_wifi_connect_async(const char *ssid, const char *password,
                             wifi_connect_cb_t cb, void *user);
+
+/* Bluetooth : scan BLE/Classic + appairage asynchrones (callbacks sur thread UI). */
+typedef struct {
+    char addr[18];    /* MAC "AA:BB:CC:DD:EE:FF" */
+    char name[64];    /* nom annoncé, sinon la MAC */
+    int  rssi;        /* dBm, 0 si inconnu */
+    bool paired;
+    bool connected;
+} bt_device_t;
+
+typedef void (*bt_scan_cb_t)(const bt_device_t *list, int n, void *user);
+void sys_bt_scan_async(bt_scan_cb_t cb, void *user);
+
+/* verb : "pair" | "connect" | "disconnect" | "remove" */
+typedef void (*bt_action_cb_t)(bool ok, const char *msg, void *user);
+void sys_bt_action_async(const char *verb, const char *addr,
+                         bt_action_cb_t cb, void *user);
+
+/* Console série Bluetooth (SPP/RFCOMM). */
+bool sys_bt_serial_active(void);
+void sys_bt_serial_set(bool on);

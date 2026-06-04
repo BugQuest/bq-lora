@@ -47,7 +47,84 @@ case "$1" in
         systemctl start bluetooth.service 2>/dev/null || true
         ;;
     bt-off)
+        systemctl stop meshui-btserial 2>/dev/null || true
         exec /usr/sbin/rfkill block bluetooth
+        ;;
+    bt-scan)
+        # Decouverte BLE/Classic. Sortie : MAC|NOM|RSSI|paired|connected|
+        # RSSI fourni par btmgmt (live), noms/etats par bluetoothctl (cache).
+        SECS="${2:-8}"
+        /usr/sbin/rfkill unblock bluetooth 2>/dev/null || true
+        /usr/bin/bluetoothctl --timeout 1 power on >/dev/null 2>&1 || true
+        TMP=$(mktemp)
+        timeout $((SECS + 3)) /usr/bin/btmgmt find 2>/dev/null | awk '
+            /dev_found:/ { mac=$3; r=""; for(i=1;i<=NF;i++) if($i=="rssi") r=$(i+1);
+                           if(!(mac in seen)){seen[mac]=1; order[++k]=mac}; rssi[mac]=r }
+            /^name / { n=$0; sub(/^name /,"",n); name[mac]=n }
+            END { for(i=1;i<=k;i++){m=order[i]; printf "%s\t%s\t%s\n", m, rssi[m], name[m]} }
+        ' > "$TMP"
+        paired=$(/usr/bin/bluetoothctl devices Paired 2>/dev/null | awk '{print $2}')
+        conn=$(/usr/bin/bluetoothctl devices Connected 2>/dev/null | awk '{print $2}')
+        is_in() { printf '%s\n' "$2" | grep -qi "$1"; }
+        # 1) appareils deja appaires en premier (avec RSSI s'ils ont ete revus)
+        for m in $paired; do
+            nm=$(/usr/bin/bluetoothctl info "$m" 2>/dev/null | sed -n 's/^[[:space:]]*Name: //p' | head -n1)
+            [ -z "$nm" ] && nm="$m"
+            r=$(awk -F'\t' -v M="$m" 'toupper($1)==toupper(M){print $2; exit}' "$TMP")
+            c=0; is_in "$m" "$conn" && c=1
+            printf '%s|%s|%s|1|%s|\n' "$m" "$nm" "${r:-0}" "$c"
+        done
+        # 2) appareils decouverts non appaires
+        while IFS="$(printf '\t')" read -r mac rssi nm; do
+            [ -z "$mac" ] && continue
+            is_in "$mac" "$paired" && continue
+            if [ -z "$nm" ]; then
+                nm=$(/usr/bin/bluetoothctl info "$mac" 2>/dev/null | sed -n 's/^[[:space:]]*Name: //p' | head -n1)
+                [ -z "$nm" ] && nm="$mac"
+            fi
+            printf '%s|%s|%s|0|0|\n' "$mac" "$nm" "${rssi:-0}"
+        done < "$TMP"
+        rm -f "$TMP"
+        ;;
+    bt-pair)
+        # Appairage "Just Works" (NoInputNoOutput) + trust + connect, mac=$2
+        mac="$2"
+        /usr/bin/bluetoothctl --timeout 25 <<EOF
+power on
+agent NoInputNoOutput
+default-agent
+pairable on
+pair $mac
+trust $mac
+connect $mac
+EOF
+        ;;
+    bt-connect)
+        exec /usr/bin/bluetoothctl connect "$2"
+        ;;
+    bt-disconnect)
+        exec /usr/bin/bluetoothctl disconnect "$2"
+        ;;
+    bt-remove)
+        exec /usr/bin/bluetoothctl remove "$2"
+        ;;
+    bt-serial-on)
+        # Console serie SPP (RFCOMM canal 1) : rend le Pi appairable/visible + lance le service
+        /usr/sbin/rfkill unblock bluetooth 2>/dev/null || true
+        /usr/bin/bluetoothctl --timeout 2 <<EOF >/dev/null 2>&1 || true
+power on
+discoverable-timeout 0
+discoverable on
+pairable on
+EOF
+        systemctl start meshui-btserial
+        ;;
+    bt-serial-off)
+        systemctl stop meshui-btserial 2>/dev/null || true
+        printf 'discoverable off\nquit\n' | /usr/bin/bluetoothctl >/dev/null 2>&1 || true
+        ;;
+    bt-serial-status)
+        systemctl is-active meshui-btserial 2>/dev/null || echo inactive
         ;;
     usb-hid)
         exec /usr/local/sbin/meshui-usb-hid
@@ -85,7 +162,7 @@ case "$1" in
         fi
         ;;
     *)
-        echo "usage: $0 {reboot|poweroff|ssh-on|ssh-off|wifi-scan|wifi-connect SSID [PASS]}" >&2
+        echo "usage: $0 {reboot|poweroff|ssh-on|ssh-off|wifi-scan|wifi-connect SSID [PASS]|bt-scan|bt-pair MAC|bt-connect MAC|bt-remove MAC|bt-serial-on|bt-serial-off}" >&2
         exit 2
         ;;
 esac

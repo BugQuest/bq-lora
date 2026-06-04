@@ -145,6 +145,16 @@ sudo -u "$U" pipx install meshtastic || true
 sleep 8
 sudo -u "$U" "$H/.local/bin/meshtastic" --host 127.0.0.1 --set lora.region EU_868 || true
 
+# Bluetooth : appairage/scan BLE + console serie SPP (RFCOMM)
+# bluez fournit bluetoothctl/btmgmt/rfcomm/sdptool ; le mode --compat est requis
+# pour publier le profil Serial Port via sdptool.
+apt-get install -y bluez
+install -d /etc/systemd/system/bluetooth.service.d
+install -m 644 "$SRC/deploy/bluetooth-compat.conf" /etc/systemd/system/bluetooth.service.d/bluetooth-compat.conf
+install -m 644 "$SRC/deploy/meshui-btserial.service" /etc/systemd/system/meshui-btserial.service
+systemctl daemon-reload
+systemctl restart bluetooth.service || true
+
 # Services systemd
 install -m 644 "$SRC/deploy/meshui.service" /etc/systemd/system/meshui.service
 install -m 644 "$SRC/deploy/meshui-splash.service" /etc/systemd/system/meshui-splash.service

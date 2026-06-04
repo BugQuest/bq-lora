@@ -1,0 +1,16 @@
+[Unit]
+Description=Console serie Bluetooth (RFCOMM SPP) pour meshui
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+# Publie le profil Serial Port (canal RFCOMM 1) dans le SDP. Necessite que
+# bluetoothd tourne en mode --compat (cf. drop-in bluetooth-compat.conf).
+ExecStartPre=-/usr/bin/sdptool add --channel=1 SP
+# Attend une connexion entrante sur le canal 1 et lance un getty (login) dessus.
+ExecStart=/usr/bin/rfcomm watch hci0 1 /sbin/agetty rfcomm0 115200 vt100
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -504,3 +504,126 @@ void sys_wifi_connect_async(const char *ssid, const char *password,
     if (password) strncpy(c->pass, password, sizeof(c->pass) - 1);
     pthread_t t; pthread_create(&t, NULL, conn_thread, c); pthread_detach(t);
 }
+
+/* ---------- Bluetooth (asynchrone, via pthread + lv_async_call) ---------- */
+typedef struct {
+    bt_scan_cb_t cb;
+    void *user;
+    bt_device_t *list;
+    int n;
+} bt_scan_ctx_t;
+
+static void bt_scan_deliver(void *arg)
+{
+    bt_scan_ctx_t *c = arg;
+    c->cb(c->list, c->n, c->user);
+    free(c->list);
+    free(c);
+}
+
+static void *bt_scan_thread(void *arg)
+{
+    bt_scan_ctx_t *c = arg;
+    int cap = 16; c->list = malloc(sizeof(bt_device_t) * cap); c->n = 0;
+    FILE *p = popen(CTL " bt-scan 8 2>/dev/null", "r");
+    if (p) {
+        char line[256];
+        while (fgets(line, sizeof(line), p)) {
+            /* MAC|NOM|RSSI|paired|connected| */
+            char *f[6]; int nf = 0; char *s = line;
+            for (; nf < 6; nf++) {
+                f[nf] = s;
+                char *sep = strchr(s, '|');
+                if (!sep) { nf++; break; }
+                *sep = 0; s = sep + 1;
+            }
+            if (nf < 5) continue;
+            chomp(f[1]);
+            if (!f[0][0]) continue;
+            if (c->n >= cap) { cap *= 2; c->list = realloc(c->list, sizeof(bt_device_t) * cap); }
+            bt_device_t *d = &c->list[c->n++];
+            memset(d, 0, sizeof(*d));
+            strncpy(d->addr, f[0], sizeof(d->addr) - 1);
+            strncpy(d->name, f[1][0] ? f[1] : f[0], sizeof(d->name) - 1);
+            d->rssi      = atoi(f[2]);
+            d->paired    = (f[3][0] == '1');
+            d->connected = (f[4][0] == '1');
+        }
+        pclose(p);
+    }
+    lv_async_call(bt_scan_deliver, c);
+    return NULL;
+}
+
+void sys_bt_scan_async(bt_scan_cb_t cb, void *user)
+{
+    bt_scan_ctx_t *c = calloc(1, sizeof(*c));
+    c->cb = cb; c->user = user;
+    pthread_t t; pthread_create(&t, NULL, bt_scan_thread, c); pthread_detach(t);
+}
+
+typedef struct {
+    bt_action_cb_t cb;
+    void *user;
+    char verb[16], addr[18];
+    bool ok;
+    char msg[256];
+} bt_act_ctx_t;
+
+static void bt_act_deliver(void *arg)
+{
+    bt_act_ctx_t *c = arg;
+    if (c->cb) c->cb(c->ok, c->msg, c->user);
+    free(c);
+}
+
+static void *bt_act_thread(void *arg)
+{
+    bt_act_ctx_t *c = arg;
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), CTL " bt-%s '%s' 2>&1", c->verb, c->addr);
+    FILE *p = popen(cmd, "r");
+    c->msg[0] = 0;
+    if (p) {
+        char line[256];
+        while (fgets(line, sizeof(line), p))
+            strncat(c->msg, line, sizeof(c->msg) - strlen(c->msg) - 1);
+        int rc = pclose(p);
+        /* bluetoothctl renvoie souvent 0 ; on confirme via le texte de sortie */
+        bool fail = strstr(c->msg, "Failed") || strstr(c->msg, "not available")
+                 || strstr(c->msg, "org.bluez.Error");
+        bool ok_word = strstr(c->msg, "successful") || strstr(c->msg, "Connected: yes")
+                    || strstr(c->msg, "Paired: yes") || strstr(c->msg, "Device has been removed");
+        c->ok = (rc == 0 && !fail) || ok_word;
+    } else {
+        c->ok = false;
+        strncpy(c->msg, "popen failed", sizeof(c->msg));
+    }
+    chomp(c->msg);
+    lv_async_call(bt_act_deliver, c);
+    return NULL;
+}
+
+void sys_bt_action_async(const char *verb, const char *addr,
+                         bt_action_cb_t cb, void *user)
+{
+    bt_act_ctx_t *c = calloc(1, sizeof(*c));
+    c->cb = cb; c->user = user;
+    strncpy(c->verb, verb, sizeof(c->verb) - 1);
+    strncpy(c->addr, addr, sizeof(c->addr) - 1);
+    pthread_t t; pthread_create(&t, NULL, bt_act_thread, c); pthread_detach(t);
+}
+
+bool sys_bt_serial_active(void)
+{
+    char b[16];
+    run_get(CTL " bt-serial-status 2>/dev/null", b, sizeof(b));
+    return strcmp(b, "active") == 0;
+}
+
+void sys_bt_serial_set(bool on)
+{
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), CTL " %s &", on ? "bt-serial-on" : "bt-serial-off");
+    system(cmd);
+}
