@@ -2103,8 +2103,8 @@ static void build_home(void) {
     lv_obj_set_flex_grow(grid, 1);
     flat(grid);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(grid, 10, 0);
+    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(grid, 8, 0);
     lv_obj_set_style_pad_column(grid, 8, 0);
     lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -2116,7 +2116,7 @@ static void build_home(void) {
         uint32_t bcol = locked ? CY_DIM : a->color;
         uint32_t tcol = locked ? CY_DIM : CY_TEXT;
         lv_obj_t *c = lv_button_create(grid);
-        lv_obj_set_size(c, LV_PCT(48), 88);
+        lv_obj_set_size(c, LV_PCT(46), 66);
         lv_obj_set_style_radius(c, 2, 0);
         lv_obj_set_style_bg_color(c, lv_color_hex(CY_PANEL), 0);
         lv_obj_set_style_bg_opa(c, locked ? LV_OPA_50 : LV_OPA_COVER, 0);
@@ -2126,10 +2126,10 @@ static void build_home(void) {
         lv_obj_set_style_pad_all(c, 4, 0);
         lv_obj_add_event_cb(c, home_card_cb, LV_EVENT_CLICKED, (void *)(intptr_t)a->app_id);
 
-        lv_obj_t *ic = label(c, locked ? LV_SYMBOL_EYE_CLOSE : a->icon, &lv_font_montserrat_20, bcol);
+        lv_obj_t *ic = label(c, locked ? LV_SYMBOL_EYE_CLOSE : a->icon, &lv_font_montserrat_16, bcol);
         lv_obj_align(ic, LV_ALIGN_CENTER, 0, -8);
-        lv_obj_t *t = label(c, a->title, FONT_MONO, tcol);
-        lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, -4);
+        lv_obj_t *t = label(c, a->title, FONT_SMALL, tcol);
+        lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, -3);
     }
 
     /* bascule MESH : l'UI pilote le nœud, ou laisse la main au téléphone */
