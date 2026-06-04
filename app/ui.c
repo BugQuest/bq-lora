@@ -246,9 +246,11 @@ static void build_statusbar(lv_obj_t *parent) {
 /* ---------------------------------------------------------------- vue CHAT */
 static lv_obj_t *msg_list;
 static lv_obj_t *compose_ta;
+static lv_obj_t *compose_bar;   /* barre de saisie : remontée au-dessus du clavier */
 
 static void add_bubble(lv_obj_t *parent, const mesh_message_t *m) {
     const mesh_channel_t *c = mesh_channel(m->ch);
+    bool ch_enc = c ? c->enc : false;   /* canal absent (MESH inactif) -> non chiffré */
 
     /* conteneur pleine largeur : aligne la bulle à gauche (reçu) ou droite (envoyé) */
     lv_obj_t *row = lv_obj_create(parent);
@@ -273,7 +275,7 @@ static void add_bubble(lv_obj_t *parent, const mesh_message_t *m) {
     char head[64];
     const char *mark = m->out ? (m->ack == 2 ? "  " LV_SYMBOL_OK : "  " LV_SYMBOL_UPLOAD) : "";
     snprintf(head, sizeof(head), "%s  %s%s", m->from, m->time, mark);
-    lv_obj_t *h = label(b, head, FONT_SMALL, c->enc ? CY_MAGENTA : CY_CYAN);
+    lv_obj_t *h = label(b, head, FONT_SMALL, ch_enc ? CY_MAGENTA : CY_CYAN);
     lv_obj_set_width(h, LV_PCT(100));
     if (m->out && m->ack == 2) lv_obj_set_style_text_color(h, lv_color_hex(CY_GREEN), 0);
 
@@ -313,6 +315,22 @@ static void ta_cb(lv_event_t *e) {
     lv_keyboard_set_textarea(kb, compose_ta);
     lv_obj_clear_flag(kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(kb);
+    /* remonte la barre de saisie au-dessus du clavier pour voir ce qu'on tape */
+    if (compose_bar) {
+        lv_obj_update_layout(kb);
+        lv_obj_set_parent(compose_bar, lv_layer_top());
+        lv_obj_set_width(compose_bar, LV_PCT(100));
+        lv_obj_align(compose_bar, LV_ALIGN_BOTTOM_MID, 0, -lv_obj_get_height(kb));
+        lv_obj_move_foreground(compose_bar);
+    }
+}
+
+/* Replace la barre de saisie dans le flux du chat (sous la liste). */
+static void compose_bar_restore(void) {
+    if (compose_bar && cur_tab == APP_CHAT) {
+        lv_obj_set_parent(compose_bar, content);
+        lv_obj_set_width(compose_bar, LV_PCT(100));
+    }
 }
 
 static void kb_cb(lv_event_t *e) {
@@ -323,6 +341,7 @@ static void kb_cb(lv_event_t *e) {
         send_cb(e);
     }
     lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+    compose_bar_restore();
 }
 
 static void build_chat(void) {
@@ -378,6 +397,7 @@ static void build_chat(void) {
 
     /* barre de composition */
     lv_obj_t *bar = lv_obj_create(content);
+    compose_bar = bar;
     lv_obj_set_size(bar, LV_PCT(100), 34);
     flat(bar);
     lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
@@ -1731,6 +1751,11 @@ static void show_tab(int app) {
     sys_btn_usb_share = NULL; sys_btn_usb_client = NULL;
     sys_log_ta = NULL;
     sys_bl_slider = NULL; sys_bl_lbl = NULL;
+    /* le clavier peut avoir remonté la barre de saisie sur la couche top :
+     * la replacer sous content pour qu'elle soit bien libérée par le clean */
+    lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+    if (compose_bar) lv_obj_set_parent(compose_bar, content);
+    compose_bar  = NULL;
     compose_ta   = NULL;
     cur_tab = app;
     lv_obj_clean(content);
@@ -1784,8 +1809,17 @@ static const app_card_t HOME_APPS[] = {
     { APP_SYS,     "SYSTEME",  LV_SYMBOL_SETTINGS, CY_AMBER   },
 };
 
+/* Apps nécessitant la liaison meshtasticd active. */
+static bool app_needs_mesh(int id) {
+    return id == APP_CHAT || id == APP_NODES;
+}
+
 static void home_card_cb(lv_event_t *e) {
     int id = (int)(intptr_t)lv_event_get_user_data(e);
+    if (app_needs_mesh(id) && !mesh_enabled()) {
+        confirm_dialog("MESH inactif.\nReactivez MESH (bouton en bas)\npour les messages et les nodes.", NULL);
+        return;
+    }
     show_tab(id);
 }
 
@@ -1819,28 +1853,31 @@ static void build_home(void) {
     lv_obj_set_style_pad_column(grid, 8, 0);
     lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
 
+    bool men = mesh_enabled();
     int n = (int)(sizeof(HOME_APPS) / sizeof(HOME_APPS[0]));
     for (int i = 0; i < n; i++) {
         const app_card_t *a = &HOME_APPS[i];
+        bool locked = app_needs_mesh(a->app_id) && !men;
+        uint32_t bcol = locked ? CY_DIM : a->color;
+        uint32_t tcol = locked ? CY_DIM : CY_TEXT;
         lv_obj_t *c = lv_button_create(grid);
         lv_obj_set_size(c, LV_PCT(48), 88);
         lv_obj_set_style_radius(c, 2, 0);
         lv_obj_set_style_bg_color(c, lv_color_hex(CY_PANEL), 0);
-        lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_color(c, lv_color_hex(a->color), 0);
+        lv_obj_set_style_bg_opa(c, locked ? LV_OPA_50 : LV_OPA_COVER, 0);
+        lv_obj_set_style_border_color(c, lv_color_hex(bcol), 0);
         lv_obj_set_style_border_width(c, 1, 0);
         lv_obj_set_style_shadow_width(c, 0, 0);
         lv_obj_set_style_pad_all(c, 4, 0);
         lv_obj_add_event_cb(c, home_card_cb, LV_EVENT_CLICKED, (void *)(intptr_t)a->app_id);
 
-        lv_obj_t *ic = label(c, a->icon, &lv_font_montserrat_20, a->color);
+        lv_obj_t *ic = label(c, locked ? LV_SYMBOL_EYE_CLOSE : a->icon, &lv_font_montserrat_20, bcol);
         lv_obj_align(ic, LV_ALIGN_CENTER, 0, -8);
-        lv_obj_t *t = label(c, a->title, FONT_MONO, CY_TEXT);
+        lv_obj_t *t = label(c, a->title, FONT_MONO, tcol);
         lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, -4);
     }
 
     /* bascule MESH : l'UI pilote le nœud, ou laisse la main au téléphone */
-    bool men = mesh_enabled();
     uint32_t mcol = men ? CY_GREEN : CY_AMBER;
     lv_obj_t *mb = lv_button_create(col);
     lv_obj_set_size(mb, LV_PCT(100), 40);
