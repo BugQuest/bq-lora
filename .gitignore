@@ -1,5 +1,6 @@
-# LVGL cloné séparément sur le Pi (voir README)
+# LVGL cloné séparément sur le Pi (voir README) — dossier ou symlink
 app/lvgl/
+app/lvgl
 
 # Artefacts de build
 build/
@@ -9,7 +10,14 @@ build/
 meshui
 
 # lv_conf.h généré depuis le template (voir docs/lv_conf.md)
+# (root = généré par provision, app/ = symlink vers celui-ci)
 app/lv_conf.h
+/lv_conf.h
+
+# Image FAT BadUSB + contenu monté (runtime, jamais versionné)
+/badusb.img
+/badusb/windows/
+/badusb/System Volume Information/
 
 # Réglages runtime (édités via l'UI)
 config.ini
