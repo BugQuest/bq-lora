@@ -1393,7 +1393,7 @@ static void build_home(void) {
     for (int i = 0; i < n; i++) {
         const app_card_t *a = &HOME_APPS[i];
         lv_obj_t *c = lv_button_create(grid);
-        lv_obj_set_size(c, LV_PCT(48), 130);
+        lv_obj_set_size(c, LV_PCT(48), 88);
         lv_obj_set_style_radius(c, 2, 0);
         lv_obj_set_style_bg_color(c, lv_color_hex(CY_PANEL), 0);
         lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
@@ -1403,8 +1403,8 @@ static void build_home(void) {
         lv_obj_set_style_pad_all(c, 4, 0);
         lv_obj_add_event_cb(c, home_card_cb, LV_EVENT_CLICKED, (void *)(intptr_t)a->app_id);
 
-        lv_obj_t *ic = label(c, a->icon, &lv_font_montserrat_28, a->color);
-        lv_obj_align(ic, LV_ALIGN_CENTER, 0, -10);
+        lv_obj_t *ic = label(c, a->icon, &lv_font_montserrat_20, a->color);
+        lv_obj_align(ic, LV_ALIGN_CENTER, 0, -8);
         lv_obj_t *t = label(c, a->title, FONT_MONO, CY_TEXT);
         lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, -4);
     }
