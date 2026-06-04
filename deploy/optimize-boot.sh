@@ -36,13 +36,22 @@ systemctl disable e2scrub_reap.service systemd-pstore.service rpi-eeprom-update.
 systemctl disable apt-daily.timer apt-daily-upgrade.timer man-db.timer \
                   dpkg-db-backup.timer e2scrub_all.timer || true
 
-# 6) Console serie de debug retiree (UART) -> boot plus propre/rapide.
-sed -i 's/console=serial0,115200 //' /boot/firmware/cmdline.txt
-sed -i '/^enable_uart=1/d' /boot/firmware/config.txt
+# 6) cmdline : console serie de debug retiree (UART) + sortie kernel silencieuse.
+M=/boot/firmware/cmdline.txt
+sed -i 's/console=serial0,115200 //' "$M"
+grep -q 'quiet' "$M" || sed -i 's/$/ quiet loglevel=3 logo.nologo/' "$M"
 
-# 7) Sondes firmware inutiles (pas de camera CSI, pas de sortie audio).
-sed -i 's/^camera_auto_detect=1/camera_auto_detect=0/' /boot/firmware/config.txt
-sed -i 's/^dtparam=audio=on/dtparam=audio=off/'        /boot/firmware/config.txt
+# 7) config firmware : retire les delais/sondes inutiles.
+#    NB : on NE touche PAS a dtoverlay=vc4-kms-v3d : meme s'il est inutilise
+#    (ecran en fbtft SPI), le retirer fait reapparaitre le framebuffer firmware
+#    legacy en fb0 et repousse l'ecran ILI9486 sur fb1 -> ecran noir.
+C=/boot/firmware/config.txt
+sed -i '/^enable_uart=1/d' "$C"
+sed -i 's/^camera_auto_detect=1/camera_auto_detect=0/' "$C"   # pas de camera CSI
+sed -i 's/^display_auto_detect=1/display_auto_detect=0/' "$C"  # pas d'ecran DSI
+sed -i 's/^dtparam=audio=on/dtparam=audio=off/'        "$C"   # pas de sortie audio
+grep -q '^disable_splash=1' "$C" || echo 'disable_splash=1' >> "$C"  # pas d'arc-en-ciel GPU
+grep -q '^boot_delay=0'    "$C" || echo 'boot_delay=0'    >> "$C"    # pas de delai firmware
 
 systemctl daemon-reload
 echo "=== optimize-boot done ==="
