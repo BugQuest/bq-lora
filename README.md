@@ -304,7 +304,8 @@ meshtastic-screen/
 ### Interface (cyberpunk minimaliste)
 
 - [x] Identité **BugQuest // LORA** (boot splash PIL + splash app LVGL animé)
-- [x] Topbar avec indicateurs **réels** : icône USB (si bail DHCP usb0), icône WiFi cyan/magenta (client/AP), horloge
+- [x] Topbar : nom du nœud + horloge
+- [x] **Barre d'état verticale** (bord gauche) : icônes système + indicateurs LoRa (voir légende ci-dessous)
 - [x] Onglet **CHAT** : canaux public + chiffrés, fil de messages avec ACK, clavier virtuel
 - [x] Onglet **NODES** : liste des nœuds **réels** (nom, SNR/RSSI, batterie, sauts, dernier contact)
 - [x] Onglet **SYS** :
@@ -318,6 +319,22 @@ meshtastic-screen/
   - APPLICATION (RELANCER MESHUI)
   - LOG SYSTÈME (`journalctl -n 30` scrollable + rafraîchir)
 - [x] Modal de calibration tactile (croix rouges, 5 points)
+
+#### Barre d'état verticale (légende des icônes)
+
+Fixée sur le bord **gauche** de l'écran, rafraîchie toutes les 1,5 s. De haut en bas :
+
+| Icône | Rôle | États / couleurs |
+|-------|------|------------------|
+| 🔌 USB | Lien USB vers le PC | cyan = bail DHCP `usb0` actif ; atténué = non connecté |
+| 📶 WiFi | État réseau WiFi | cyan = client connecté ; magenta = point d'accès (hotspot) ; atténué = aucun lien |
+| *(séparateur)* | — | sépare le groupe système du groupe LoRa |
+| ➤ Lien mesh | Liaison vers `meshtasticd` (API TCP 4403) | vert = établie et configurée ; magenta = absente |
+| ▤ + n | Nombre de nœuds vus sur le mesh | valeur en clair (atténuée si lien mesh coupé) |
+| ↻ + % | Utilisation du canal (air time) | atténué < 40 % ; ambre ≥ 40 % (canal chargé) |
+| ⚡ / batterie | Batterie du nœud | symbole batterie gradué (vert > 20 %, ambre sinon) ; éclair atténué si pas d'alim batterie (cas portduino sur secteur) |
+
+Les valeurs LoRa proviennent de `mesh_self()` (région, preset, batterie, utilisation canal, nœuds) alimenté par le flux protobuf de `meshtasticd`.
 
 ### Sécurité
 

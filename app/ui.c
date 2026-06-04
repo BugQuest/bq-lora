@@ -209,7 +209,7 @@ static void build_statusbar(lv_obj_t *parent) {
     lv_obj_set_style_bg_opa(sb, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(sb, lv_color_hex(CY_CYAN), 0);
     lv_obj_set_style_border_width(sb, 1, 0);
-    lv_obj_set_style_border_side(sb, LV_BORDER_SIDE_LEFT, 0);
+    lv_obj_set_style_border_side(sb, LV_BORDER_SIDE_RIGHT, 0);
     lv_obj_set_style_radius(sb, 0, 0);
     lv_obj_set_style_pad_top(sb, 8, 0);
     lv_obj_set_style_pad_bottom(sb, 8, 0);
@@ -1736,16 +1736,17 @@ void ui_init(void) {
     lv_obj_set_style_pad_column(body, 0, 0);
     lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
 
+    /* barre d'état à gauche, puis contenu (extensible) à droite */
+    build_statusbar(body);
+    statusbar_refresh(NULL);
+    lv_timer_create(statusbar_refresh, 1500, NULL);
+
     content = lv_obj_create(body);
     lv_obj_set_height(content, LV_PCT(100));
     lv_obj_set_flex_grow(content, 1);
     flat(content);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
-
-    build_statusbar(body);
-    statusbar_refresh(NULL);
-    lv_timer_create(statusbar_refresh, 1500, NULL);
 
     /* clavier overlay sur le top layer : visible au-dessus de tout (chat + modaux) */
     kb = lv_keyboard_create(lv_layer_top());
