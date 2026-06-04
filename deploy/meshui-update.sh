@@ -40,6 +40,20 @@ install -m 755 deploy/usb-hid-setup.sh          /usr/local/sbin/meshui-usb-hid
 install -m 755 deploy/usb-storage-setup.sh      /usr/local/sbin/meshui-usb-storage
 install -m 755 deploy/backlight-init.sh         /usr/local/sbin/meshui-backlight-init
 install -m 755 deploy/meshui-update.sh          /usr/local/sbin/meshui-update 2>/dev/null || true
+install -m 755 deploy/shutdown-splash.sh        /usr/local/sbin/meshui-shutdown-splash 2>/dev/null || true
+
+# Reinstalle les unites systemd + drop-ins s'ils ont change, puis recharge.
+for u in meshui.service meshui-splash.service meshui-shutdown.service \
+         meshui-btserial.service backlight.service usb-gadget.service; do
+    [ -f "deploy/$u" ] && install -m 644 "deploy/$u" "/etc/systemd/system/$u"
+done
+if [ -f deploy/bluetooth-compat.conf ]; then
+    install -d /etc/systemd/system/bluetooth.service.d
+    install -m 644 deploy/bluetooth-compat.conf \
+        /etc/systemd/system/bluetooth.service.d/bluetooth-compat.conf
+fi
+systemctl daemon-reload
+systemctl enable meshui-shutdown.service 2>/dev/null || true
 progress 99
 
 systemctl restart meshui
