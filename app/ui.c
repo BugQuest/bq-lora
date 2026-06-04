@@ -338,6 +338,15 @@ static void build_nodes(void) {
     }
 }
 
+/* Rafraîchit la vue courante quand le backend Meshtastic signale du neuf
+   (nouveau message reçu, ACK, nœud découvert…). */
+static void mesh_refresh_cb(lv_timer_t *t) {
+    (void)t;
+    if (!mesh_take_dirty()) return;
+    if (cur_tab == APP_CHAT && msg_list) rebuild_messages();
+    else if (cur_tab == APP_NODES)       show_tab(APP_NODES);
+}
+
 /* ---------------------------------------------------------------- vue SYS */
 static lv_obj_t *sys_lbl_host, *sys_lbl_ipw, *sys_lbl_ipu, *sys_lbl_uptime;
 static lv_obj_t *sys_lbl_cpu, *sys_lbl_mem, *sys_lbl_disk, *sys_lbl_thr, *sys_lbl_kernel;
@@ -1627,6 +1636,9 @@ void ui_init(void) {
     build_topbar(scr);
     topbar_refresh(NULL);
     tb_timer = lv_timer_create(topbar_refresh, 5000, NULL);
+
+    /* rafraîchissement des vues chat/nodes sur données Meshtastic entrantes */
+    lv_timer_create(mesh_refresh_cb, 700, NULL);
 
     content = lv_obj_create(scr);
     lv_obj_set_width(content, LV_PCT(100));

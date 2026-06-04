@@ -16,11 +16,12 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y || true
 apt-get install -y build-essential cmake git python3-pil python3-gpiozero dosfstools
 
-# LVGL (v9.2)
+# LVGL (v9.2) — les sources buildables vivent dans $SRC/app (layout du dépôt).
+# LVGL et lv_conf.h doivent donc être visibles depuis app/.
 if [ ! -d "$H/lvgl" ]; then
     sudo -u "$U" git clone --depth 1 -b release/v9.2 https://github.com/lvgl/lvgl.git "$H/lvgl"
 fi
-ln -sfn "$H/lvgl" "$SRC/lvgl"
+ln -sfn "$H/lvgl" "$SRC/app/lvgl"
 
 # lv_conf.h depuis le template + réglages validés
 cp "$H/lvgl/lv_conf_template.h" "$SRC/lv_conf.h"
@@ -34,10 +35,13 @@ done
 sed -i -E 's/(#define LV_FONT_UNSCII_16) +0/\1 1/' "$SRC/lv_conf.h"
 sed -i -E 's/(#define LV_USE_QRCODE) +0/\1 1/' "$SRC/lv_conf.h"
 
+# lv_conf.h doit être trouvable depuis app/ (LV_CONF_INCLUDE_SIMPLE)
+ln -sfn "$SRC/lv_conf.h" "$SRC/app/lv_conf.h"
+
 chown -R "$U:$U" "$H"
 
-# Build
-sudo -u "$U" cmake -S "$SRC" -B "$SRC/build"
+# Build (source = app/, sortie = build/ ; le service lance build/meshui)
+sudo -u "$U" cmake -S "$SRC/app" -B "$SRC/build"
 sudo -u "$U" cmake --build "$SRC/build" --target meshui -j2
 
 # Helper privilégié + sudoers NOPASSWD limités (pour les contrôles dans l'UI)

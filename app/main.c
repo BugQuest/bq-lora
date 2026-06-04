@@ -3,6 +3,7 @@
 #include "touch.h"
 #include "calib.h"
 #include "settings.h"
+#include "mesh.h"
 #include <unistd.h>
 #include <time.h>
 #include <stdint.h>
@@ -34,10 +35,14 @@ int main(void)
     /* Pilote tactile maison (lecture brute + affine). */
     touch_init();
 
+    /* Liaison vers le nœud Meshtastic local (meshtasticd, API TCP 4403). */
+    mesh_init();
+
     ui_init();
     ui_show_splash(after_splash);
 
     while (1) {
+        mesh_poll();
         uint32_t idle = lv_timer_handler();
         if (idle > 20) idle = 20;
         usleep(idle * 1000);

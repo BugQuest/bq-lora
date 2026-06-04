@@ -17,6 +17,8 @@ cd "$SRC"
 sudo -u "$U" git fetch -q origin master
 sudo -u "$U" git reset --hard origin/master
 
+# Reconfigure (le GLOB CMake doit voir les eventuels nouveaux .c de app/)
+sudo -u "$U" cmake -S app -B build
 # Rebuild incremental (LVGL deja compile, seuls les fichiers modifies recompilent)
 sudo -u "$U" cmake --build build --target meshui -j2
 

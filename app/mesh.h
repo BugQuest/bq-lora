@@ -3,9 +3,9 @@
 #include <stdbool.h>
 
 /*
- * Interface "backend" Meshtastic — pour l'instant alimentée par des données
- * factices (mesh.c). À terme, ces accesseurs seront remplis par la liaison
- * série/protobuf vers le nœud LoRa réel, sans changer l'UI.
+ * Interface "backend" Meshtastic. Implémentée par mesh.c : client protobuf
+ * natif (API Stream TCP de meshtasticd sur 127.0.0.1:4403). Les accesseurs
+ * renvoient des const char* vers du stockage interne stable.
  */
 
 typedef struct {
@@ -55,3 +55,10 @@ const mesh_message_t *mesh_message(uint8_t ch, int idx);
 void                mesh_send(uint8_t ch, const char *text);
 
 const mesh_self_t  *mesh_self(void);
+
+/* ---- Cycle de vie de la liaison vers meshtasticd ---- */
+void mesh_init(void);       /* ouvre la connexion API (non bloquant) */
+void mesh_poll(void);       /* à appeler régulièrement depuis la boucle principale */
+bool mesh_connected(void);  /* true si la liaison est établie et configurée */
+/* true (et remet à zéro) si messages/nœuds ont changé depuis le dernier appel */
+bool mesh_take_dirty(void);

@@ -8,8 +8,9 @@ framebuffer (`/dev/fb0`), sans serveur graphique (OS en version *Lite*).
 
 > État actuel : base matérielle (affichage + rétroéclairage + tactile) validée.
 > Radio LoRa **opérationnelle** : SX1262 détecté par `meshtasticd`, nœud Meshtastic
-> EU_868 actif (cf. [Radio LoRa](#radio-lora-sx1262)). Reste à brancher l'UI LVGL
-> sur l'API du nœud (port 4403) en remplacement du backend factice.
+> EU_868 actif (cf. [Radio LoRa](#radio-lora-sx1262)). L'UI LVGL est **branchée sur
+> l'API du nœud** (`127.0.0.1:4403`) via un client protobuf natif en C : nœuds,
+> canaux et messages réels, envoi/réception de texte et ACK.
 
 ---
 
@@ -108,9 +109,16 @@ Le Core1262 n'est pas un nœud autonome : c'est un modem radio. Sur le Pi, on
 fait donc tourner **`meshtasticd`** (le portage Linux natif de Meshtastic,
 *portduino*), qui pilote le SX1262 en SPI et constitue un vrai nœud Meshtastic
 local. L'interface LVGL se connecte à ce nœud via son **API TCP locale
-(`127.0.0.1:4403`, protobuf)** — c'est elle qui remplacera à terme le backend
-factice `mesh.c`. (Cette approche remplace l'ancienne idée de pont série :
-inutile puisque la radio est directement sur le Pi.)
+(`127.0.0.1:4403`, protobuf)**, implémentée dans `app/mesh.c` (client natif C,
+codec protobuf maison `app/pb.c`). (Cette approche remplace l'ancienne idée de
+pont série : inutile puisque la radio est directement sur le Pi.)
+
+Le client est entièrement piloté par la boucle LVGL (socket non bloquant,
+`mesh_poll()`, aucun thread) : *handshake* `want_config_id`, réception des
+`FromRadio` (my_info / node_info / channel / config / paquets texte), envoi des
+`ToRadio` (paquets texte + heartbeat), ACK via paquets ROUTING, reconnexion
+automatique. Le codec `pb.c` ne dépend d'aucune lib (pas de nanopb) : empreinte
+minimale, juste les champs utiles du protocole Meshtastic.
 
 ### Câblage — bus SPI1 dédié
 
@@ -251,7 +259,8 @@ meshtastic-screen/
 │   ├── main.c                # tick + display fbdev + touch + ui_init
 │   ├── ui.c / ui.h           # toute l'UI : topbar, chat, nodes, sys, modales
 │   ├── theme.h               # palette cyberpunk + polices
-│   ├── mesh.c / mesh.h       # backend Meshtastic FACTICE (à remplacer)
+│   ├── mesh.c / mesh.h       # backend Meshtastic : client API TCP 4403 (protobuf natif)
+│   ├── pb.c / pb.h           # codec protobuf minimal (wire format, sans nanopb)
 │   ├── sys.c / sys.h         # infos système + actions privilégiées + WiFi async
 │   ├── touch.c / touch.h     # pilote tactile maison (evdev + affine + lissage)
 │   └── calib.c / calib.h     # calibrage 5 points moindres carrés
@@ -297,7 +306,7 @@ meshtastic-screen/
 - [x] Identité **BugQuest // LORA** (boot splash PIL + splash app LVGL animé)
 - [x] Topbar avec indicateurs **réels** : icône USB (si bail DHCP usb0), icône WiFi cyan/magenta (client/AP), horloge
 - [x] Onglet **CHAT** : canaux public + chiffrés, fil de messages avec ACK, clavier virtuel
-- [x] Onglet **NODES** : liste des nœuds (factice — backend Meshtastic à brancher)
+- [x] Onglet **NODES** : liste des nœuds **réels** (nom, SNR/RSSI, batterie, sauts, dernier contact)
 - [x] Onglet **SYS** :
   - INFO (hostname, IPs wlan/usb, uptime, CPU temp, RAM, disque, alim, kernel)
   - ALIMENTATION (Éteindre / Redémarrer avec confirmation)
@@ -327,11 +336,12 @@ meshtastic-screen/
 - [x] Câblage radio (SPI1 dédié) + overlay `config.txt` + `config/lora.yaml`
 - [x] Module branché, **SX1262 détecté** (`sx1262 init success`), région EU_868 @ 869.525 MHz
 - [x] Provisionnement automatisé (meshtasticd + config + région) dans `provision.sh`
-- [ ] Pont UI ↔ API TCP 4403 en remplacement du `mesh.c` factice
-- [ ] Remplacer les données factices par les vraies (nœuds, canaux, messages)
-- [ ] Envoi/réception réels sur LongFast + canaux PSK chiffrés
-- [ ] Gestion ACK et reprise sur erreur
+- [x] Pont UI ↔ API TCP 4403 (client protobuf natif C `mesh.c` + `pb.c`)
+- [x] Données réelles (nœuds, canaux, messages) à la place du backend factice
+- [x] Envoi/réception réels de texte sur LongFast + canaux PSK chiffrés
+- [x] Gestion ACK (paquets ROUTING) et reconnexion automatique
 - [ ] Position GPS des nœuds → vue carte hors-ligne (tuiles préchargées)
+- [ ] Exposer l'état `mesh_self()` (région/preset/util/uptime) dans l'UI
 
 ### À faire — polish & extensions
 
