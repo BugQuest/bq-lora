@@ -92,6 +92,7 @@ static bool        s_dirty;
 static time_t      s_reload_at;        /* != 0 : re-demander la config à cette date */
 
 /* ----------------------------------------------------------------- liaison */
+static bool   s_enabled = true;        /* l'UI pilote-t-elle la liaison ? */
 static int    s_fd = -1;
 static bool   s_connecting;
 static bool   s_configured;
@@ -681,11 +682,13 @@ void mesh_init(void)
     s_self.region = s_region;
     s_self.preset = s_preset;
     s_self.uptime = s_uptime;
-    mesh_try_connect();
+    if (s_enabled) mesh_try_connect();
 }
 
 void mesh_poll(void)
 {
+    if (!s_enabled) return;          /* liaison libérée : on laisse le port à un autre client */
+
     time_t now = time(NULL);
 
     if (s_fd < 0) {
@@ -710,6 +713,20 @@ void mesh_poll(void)
 }
 
 bool mesh_connected(void) { return s_fd >= 0 && s_configured; }
+
+void mesh_set_enabled(bool en)
+{
+    if (en == s_enabled) return;
+    s_enabled = en;
+    if (!en) {
+        mesh_close();            /* ferme le socket -> libère le port 4403 */
+    } else {
+        s_last_attempt = 0;      /* force une reconnexion immédiate au prochain poll */
+    }
+    s_dirty = true;              /* l'UI rafraîchit l'indicateur de lien */
+}
+
+bool mesh_enabled(void) { return s_enabled; }
 
 bool mesh_take_dirty(void)
 {

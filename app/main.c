@@ -35,7 +35,10 @@ int main(void)
     /* Pilote tactile maison (lecture brute + affine). */
     touch_init();
 
-    /* Liaison vers le nœud Meshtastic local (meshtasticd, API TCP 4403). */
+    /* Liaison vers le nœud Meshtastic local (meshtasticd, API TCP 4403).
+     * Respecte le choix persistant : si l'utilisateur a passé la main au
+     * téléphone, l'UI ne reprend pas le port 4403 au redémarrage. */
+    mesh_set_enabled(settings_mesh_enabled());
     mesh_init();
 
     ui_init();

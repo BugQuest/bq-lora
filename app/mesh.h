@@ -87,3 +87,9 @@ void mesh_poll(void);       /* à appeler régulièrement depuis la boucle princ
 bool mesh_connected(void);  /* true si la liaison est établie et configurée */
 /* true (et remet à zéro) si messages/nœuds ont changé depuis le dernier appel */
 bool mesh_take_dirty(void);
+
+/* Active/désactive l'usage de meshtasticd par l'UI. Désactiver ferme la
+ * connexion API locale (libère le port 4403 pour un autre client, ex. l'appli
+ * Android via le hotspot). Réactiver relance la connexion. */
+void mesh_set_enabled(bool en);
+bool mesh_enabled(void);

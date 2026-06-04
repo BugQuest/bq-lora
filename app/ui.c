@@ -1717,16 +1717,29 @@ static void home_card_cb(lv_event_t *e) {
     show_tab(id);
 }
 
+/* Bascule l'usage de meshtasticd par l'UI (libère/reprend le port 4403). */
+static void mesh_toggle_cb(lv_event_t *e) {
+    (void)e;
+    bool en = !mesh_enabled();
+    mesh_set_enabled(en);
+    settings_set_mesh_enabled(en);
+    settings_save();
+    show_tab(APP_HOME);   /* reconstruit le hub pour refléter l'état */
+}
+
 static void build_home(void) {
     lv_obj_t *col = lv_obj_create(content);
     lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
     flat(col);
     lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_all(col, 6, 0);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(col, 6, 0);
 
-    /* grille 2 col x 3 lignes — pleine hauteur disponible */
+    /* grille 2 col x 3 lignes — occupe la hauteur restante */
     lv_obj_t *grid = lv_obj_create(col);
-    lv_obj_set_size(grid, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_width(grid, LV_PCT(100));
+    lv_obj_set_flex_grow(grid, 1);
     flat(grid);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1753,6 +1766,24 @@ static void build_home(void) {
         lv_obj_t *t = label(c, a->title, FONT_MONO, CY_TEXT);
         lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, -4);
     }
+
+    /* bascule MESH : l'UI pilote le nœud, ou laisse la main au téléphone */
+    bool men = mesh_enabled();
+    uint32_t mcol = men ? CY_GREEN : CY_AMBER;
+    lv_obj_t *mb = lv_button_create(col);
+    lv_obj_set_size(mb, LV_PCT(100), 40);
+    lv_obj_set_style_radius(mb, 2, 0);
+    lv_obj_set_style_bg_opa(mb, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(mb, lv_color_hex(mcol), 0);
+    lv_obj_set_style_border_width(mb, 1, 0);
+    lv_obj_set_style_border_color(mb, lv_color_hex(mcol), 0);
+    lv_obj_set_style_shadow_width(mb, 0, 0);
+    lv_obj_add_event_cb(mb, mesh_toggle_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *ml = label(mb,
+        men ? LV_SYMBOL_GPS "  MESH : UI ACTIVE"
+            : LV_SYMBOL_GPS "  MESH : LIBRE (telephone)",
+        FONT_SMALL, men ? CY_GREEN : CY_AMBER);
+    lv_obj_center(ml);
 }
 
 /* ---------------------------------------------------------------- app HOTSPOT */
