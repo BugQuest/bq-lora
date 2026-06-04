@@ -369,7 +369,7 @@ identique au format de l'application Meshtastic officielle.
 
 - [x] Workflow flash : Imager pour l'OS + cloud-init `user-data` complété + bundle tarball
 - [x] `provision.sh` idempotent (apt + LVGL clone + lv_conf généré + build + services)
-- [x] 3 voies d'accès SSH : WiFi Freebox, hotspot 10.42.0.1, gadget USB 10.42.0.1
+- [x] 3 voies d'accès SSH : WiFi Freebox, hotspot 10.42.0.1, gadget USB 10.42.1.1 (sous-réseaux distincts → coexistence hotspot + USB)
 
 ### À faire — Intégration Meshtastic (radio SX1262)
 

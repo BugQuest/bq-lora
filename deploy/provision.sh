@@ -98,10 +98,15 @@ sed -i 's/modules-load=dwc2,g_ether/modules-load=dwc2/' /boot/firmware/cmdline.t
 modprobe -r g_ether 2>/dev/null || true
 systemctl enable usb-gadget.service || true
 systemctl start  usb-gadget.service || true
-# Profil NM "shared" pour usb0 (DHCP du Pi vers le PC)
+# Profil NM "shared" pour usb0 (DHCP du Pi vers le PC).
+# Sous-reseau 10.42.1.0/24 distinct de celui du hotspot WiFi (10.42.0.0/24) :
+# sans adresse explicite, NetworkManager attribue 10.42.0.1 aux DEUX interfaces
+# shared, ce qui casse l'USB des que le hotspot est actif (collision d'IP/dnsmasq).
 nmcli connection show usb0 >/dev/null 2>&1 || \
     nmcli connection add type ethernet ifname usb0 con-name usb0 \
         ipv4.method shared ipv6.method ignore autoconnect yes
+# enforce l'adresse (nouveaux profils ET installs existants)
+nmcli connection modify usb0 ipv4.method shared ipv4.addresses 10.42.1.1/24 ipv6.method ignore
 nmcli connection up usb0 2>/dev/null || true
 
 # === Radio LoRa SX1262 (Waveshare Core1262-868M) : noeud Meshtastic natif ===
