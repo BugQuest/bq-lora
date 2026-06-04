@@ -74,6 +74,9 @@ typedef struct {
 static node_slot_t s_nodes[MAX_NODES];
 static int         s_node_count;
 
+/* total cumulatif de messages texte reçus (hors les nôtres) -> badge non-lus */
+static unsigned    s_rx_total;
+
 static chan_slot_t s_chans[MAX_CHANS];
 static int         s_chan_count;
 
@@ -228,6 +231,7 @@ static void add_text(int chan_index, uint32_t from, uint32_t id,
 
     m->m.out = (from == s_my_num && s_my_num);
     m->m.ack = m->m.out ? 1 : 0;
+    if (!m->m.out) s_rx_total++;     /* message entrant -> incremente les non-lus */
     s_dirty = true;
 }
 
@@ -743,6 +747,8 @@ const mesh_channel_t *mesh_channel(int i)
     if (i < 0 || i >= s_chan_count) return NULL;
     return &s_chans[i].pub;
 }
+
+unsigned mesh_rx_msg_total(void) { return s_rx_total; }
 
 int mesh_node_count(void) { return s_node_count; }
 

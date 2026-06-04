@@ -26,6 +26,7 @@ enum {
     APP_HOTSPOT = 5,
     APP_BADUSB  = 6,
     APP_BT      = 7,
+    APP_ABOUT   = 8,
 };
 
 static lv_obj_t *content;          /* zone centrale, reconstruite par app */
@@ -70,6 +71,13 @@ static lv_obj_t *tb_clock, *tb_name, *tb_back;
 /* barre d'état verticale (droite) : icônes système + LoRa */
 static lv_obj_t *sb_usb, *sb_wifi, *sb_link, *sb_nodes, *sb_util, *sb_batt;
 static lv_timer_t *tb_timer;
+
+/* Badge non-lus sur la carte MESSAGES du hub. msg_seen = compteur "lu" (remis
+ * a niveau a l'ouverture du CHAT) ; non-lus = mesh_rx_msg_total() - msg_seen. */
+static lv_obj_t *home_msg_card, *home_msg_badge;
+static unsigned  msg_seen;
+static void      update_msg_badge(void);
+
 static void tb_back_cb(lv_event_t *e) { (void)e; show_tab(APP_HOME); }
 
 static int read_int_file(const char *p) {
@@ -347,6 +355,7 @@ static void kb_cb(lv_event_t *e) {
 }
 
 static void build_chat(void) {
+    msg_seen = mesh_rx_msg_total();   /* ouverture du CHAT = tout marque comme lu */
     /* rangée des canaux */
     lv_obj_t *chans = lv_obj_create(content);
     lv_obj_set_size(chans, LV_PCT(100), 28);
@@ -477,6 +486,7 @@ static void mesh_refresh_cb(lv_timer_t *t) {
     if (cm_ov && cm_list) cm_rebuild_list();   /* canaux changés -> rafraîchit le gestionnaire */
     if (cur_tab == APP_CHAT && msg_list) rebuild_messages();
     else if (cur_tab == APP_NODES)       show_tab(APP_NODES);
+    else if (cur_tab == APP_HOME)        update_msg_badge();
 }
 
 /* ---------------------------------------------------------------- vue SYS */
@@ -1975,6 +1985,7 @@ static void bt_modal_open(void) {
 static void build_home(void);
 static void build_hotspot_app(void);
 static void build_badusb_app(void);
+static void build_about(void);
 
 static void show_tab(int app) {
     if (sys_refresh_timer) { lv_timer_delete(sys_refresh_timer); sys_refresh_timer = NULL; }
@@ -2022,6 +2033,7 @@ static void show_tab(int app) {
         case APP_SYS:     build_sys();           break;
         case APP_HOTSPOT: build_hotspot_app();   break;
         case APP_BADUSB:  build_badusb_app();    break;
+        case APP_ABOUT:   build_about();         break;
         case APP_WIFI:
             /* WIFI = modal flottant ; on reste conceptuellement sur HOME */
             cur_tab = APP_HOME;
@@ -2062,6 +2074,7 @@ static const app_card_t HOME_APPS[] = {
     { APP_HOTSPOT, "HOTSPOT",  LV_SYMBOL_IMAGE,    CY_MAGENTA },
     { APP_BADUSB,  "BAD USB",  LV_SYMBOL_USB,      CY_MAGENTA },
     { APP_SYS,     "SYSTEME",  LV_SYMBOL_SETTINGS, CY_AMBER   },
+    { APP_ABOUT,   "A PROPOS", LV_SYMBOL_LIST,     CY_AMBER   },
 };
 
 /* Apps nécessitant la liaison meshtasticd active. */
@@ -2088,7 +2101,34 @@ static void mesh_toggle_cb(lv_event_t *e) {
     show_tab(APP_HOME);   /* reconstruit le hub pour refléter l'état */
 }
 
+/* Cree/met a jour/efface la pastille de non-lus sur la carte MESSAGES. */
+static void update_msg_badge(void) {
+    if (!home_msg_card) return;
+    unsigned unread = mesh_rx_msg_total() - msg_seen;
+    if (home_msg_badge) { lv_obj_delete(home_msg_badge); home_msg_badge = NULL; }
+    if (unread == 0) return;
+
+    char buf[8];
+    if (unread > 99) snprintf(buf, sizeof(buf), "99+");
+    else             snprintf(buf, sizeof(buf), "%u", unread);
+
+    lv_obj_t *b = lv_label_create(home_msg_card);
+    home_msg_badge = b;
+    lv_label_set_text(b, buf);
+    lv_obj_set_style_text_font(b, FONT_SMALL, 0);
+    lv_obj_set_style_text_color(b, lv_color_hex(CY_TEXT), 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_hor(b, 5, 0);
+    lv_obj_set_style_pad_ver(b, 1, 0);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -2, 2);
+}
+
 static void build_home(void) {
+    /* le contenu vient d'etre nettoye : les anciens objets sont invalides */
+    home_msg_card = NULL; home_msg_badge = NULL;
+
     lv_obj_t *col = lv_obj_create(content);
     lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
     flat(col);
@@ -2130,7 +2170,10 @@ static void build_home(void) {
         lv_obj_align(ic, LV_ALIGN_CENTER, 0, -8);
         lv_obj_t *t = label(c, a->title, FONT_SMALL, tcol);
         lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, -3);
+
+        if (a->app_id == APP_CHAT) home_msg_card = c;   /* support du badge non-lus */
     }
+    update_msg_badge();
 
     /* bascule MESH : l'UI pilote le nœud, ou laisse la main au téléphone */
     uint32_t mcol = men ? CY_GREEN : CY_AMBER;
@@ -2271,6 +2314,74 @@ static void build_badusb_app(void) {
 
     bap_refresh(NULL);
     sys_refresh_timer = lv_timer_create(bap_refresh, 3000, NULL);
+}
+
+/* ---------------------------------------------------------------- app A PROPOS */
+/* Petite ligne "cle : valeur" dans un panneau d'infos. */
+static void about_kv(lv_obj_t *parent, const char *k, const char *v) {
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(row);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    label(row, k, FONT_SMALL, CY_DIM);
+    lv_obj_t *val = label(row, v, FONT_SMALL, CY_TEXT);
+    lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
+}
+
+static void build_about(void) {
+    lv_obj_t *col = lv_obj_create(content);
+    lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
+    flat(col);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(col, 10, 0);
+    lv_obj_set_style_pad_row(col, 10, 0);
+    lv_obj_set_scroll_dir(col, LV_DIR_VER);
+
+    /* en-tete : titre cyberpunk + version */
+    label(col, "BugQuest", FONT_BIG, CY_CYAN);
+    label(col, "/ / L O R A", FONT_BODY, CY_MAGENTA);
+    label(col, "v0.1", FONT_SMALL, CY_DIM);
+
+    /* materiel */
+    lv_obj_t *hw = lv_obj_create(col);
+    lv_obj_set_size(hw, LV_PCT(100), LV_SIZE_CONTENT);
+    panel(hw, CY_BORDER);
+    lv_obj_set_flex_flow(hw, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(hw, 4, 0);
+    lv_obj_clear_flag(hw, LV_OBJ_FLAG_SCROLLABLE);
+    label(hw, "MATERIEL", FONT_SMALL, CY_AMBER);
+    about_kv(hw, "Carte",  "Pi Zero 2 W");
+    about_kv(hw, "Ecran",  "MKS TS35-R / ILI9486");
+    about_kv(hw, "Tactile","XPT2046");
+    about_kv(hw, "Radio",  "SX1262 868 MHz");
+
+    /* logiciel */
+    lv_obj_t *sw = lv_obj_create(col);
+    lv_obj_set_size(sw, LV_PCT(100), LV_SIZE_CONTENT);
+    panel(sw, CY_BORDER);
+    lv_obj_set_flex_flow(sw, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(sw, 4, 0);
+    lv_obj_clear_flag(sw, LV_OBJ_FLAG_SCROLLABLE);
+    label(sw, "LOGICIEL", FONT_SMALL, CY_AMBER);
+    about_kv(sw, "UI",    "LVGL 9.2 (fbdev)");
+    about_kv(sw, "Mesh",  "meshtasticd");
+    about_kv(sw, "Noeud", settings_node_name());
+
+    /* projet */
+    lv_obj_t *pr = lv_obj_create(col);
+    lv_obj_set_size(pr, LV_PCT(100), LV_SIZE_CONTENT);
+    panel(pr, CY_BORDER);
+    lv_obj_set_flex_flow(pr, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(pr, 4, 0);
+    lv_obj_clear_flag(pr, LV_OBJ_FLAG_SCROLLABLE);
+    label(pr, "PROJET", FONT_SMALL, CY_AMBER);
+    about_kv(pr, "Auteur", "BugQuest");
+    lv_obj_t *gh = label(pr, "github.com/BugQuest/bq-lora", FONT_SMALL, CY_CYAN);
+    lv_obj_set_width(gh, LV_PCT(100));
+    lv_label_set_long_mode(gh, LV_LABEL_LONG_DOT);
 }
 
 /* ---------------------------------------------------------------- splash */

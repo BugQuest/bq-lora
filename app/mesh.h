@@ -82,6 +82,10 @@ const mesh_node_t  *mesh_node(int i);
 
 int                 mesh_message_count(uint8_t ch);
 const mesh_message_t *mesh_message(uint8_t ch, int idx);
+
+/* Compteur cumulatif de messages texte REÇUS (hors les nôtres), monotone depuis
+ * le lancement. L'UI en garde une copie "lue" pour calculer les non-lus. */
+unsigned            mesh_rx_msg_total(void);
 void                mesh_send(uint8_t ch, const char *text);
 
 const mesh_self_t  *mesh_self(void);
