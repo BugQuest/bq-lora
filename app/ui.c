@@ -60,7 +60,9 @@ static lv_obj_t *label(lv_obj_t *parent, const char *txt, const lv_font_t *font,
 }
 
 /* ---------------------------------------------------------------- barre haute */
-static lv_obj_t *tb_clock, *tb_usb, *tb_wifi, *tb_name, *tb_back;
+static lv_obj_t *tb_clock, *tb_name, *tb_back;
+/* barre d'état verticale (droite) : icônes système + LoRa */
+static lv_obj_t *sb_usb, *sb_wifi, *sb_link, *sb_nodes, *sb_util, *sb_batt;
 static lv_timer_t *tb_timer;
 static void tb_back_cb(lv_event_t *e) { (void)e; show_tab(APP_HOME); }
 
@@ -94,14 +96,52 @@ static void topbar_refresh(lv_timer_t *t) {
     struct tm tm; localtime_r(&now, &tm);
     char b[16]; snprintf(b, sizeof(b), "%02d:%02d", tm.tm_hour, tm.tm_min);
     lv_label_set_text(tb_clock, b);
+}
 
+/* Met à jour la barre d'état verticale (système + LoRa). */
+static void statusbar_refresh(lv_timer_t *t) {
+    (void)t;
+    if (!sb_usb) return;
+
+    /* --- système --- */
     bool usb_up = usb_client_connected();
-    lv_obj_set_style_text_color(tb_usb, lv_color_hex(usb_up ? CY_CYAN : CY_BORDER), 0);
+    lv_obj_set_style_text_color(sb_usb, lv_color_hex(usb_up ? CY_CYAN : CY_BORDER), 0);
 
     bool wifi_up = read_int_file("/sys/class/net/wlan0/carrier") == 1;
     bool ap = sys_hotspot_active();
     uint32_t wcol = ap ? CY_MAGENTA : (wifi_up ? CY_CYAN : CY_BORDER);
-    lv_obj_set_style_text_color(tb_wifi, lv_color_hex(wcol), 0);
+    lv_obj_set_style_text_color(sb_wifi, lv_color_hex(wcol), 0);
+
+    /* --- LoRa / mesh --- */
+    bool link = mesh_connected();
+    const mesh_self_t *s = mesh_self();
+
+    /* lien vers meshtasticd : vert si établi, sinon rouge atténué */
+    lv_obj_set_style_text_color(sb_link, lv_color_hex(link ? CY_GREEN : CY_MAGENTA), 0);
+
+    /* nombre de nœuds vus */
+    char nb[8]; snprintf(nb, sizeof(nb), "%d", s->nodes);
+    lv_label_set_text(sb_nodes, nb);
+    lv_obj_set_style_text_color(sb_nodes, lv_color_hex(link ? CY_TEXT : CY_DIM), 0);
+
+    /* utilisation canal (air time) : ambre si chargé */
+    int util = (int)(s->chan_util + 0.5f);
+    char ub[8]; snprintf(ub, sizeof(ub), "%d%%", util);
+    lv_label_set_text(sb_util, ub);
+    lv_obj_set_style_text_color(sb_util, lv_color_hex(util >= 40 ? CY_AMBER : CY_DIM), 0);
+
+    /* batterie du nœud (0 = non alimenté par batterie -> tiret) */
+    if (s->batt > 0 && s->batt <= 100) {
+        const char *sym = s->batt > 80 ? LV_SYMBOL_BATTERY_FULL :
+                          s->batt > 55 ? LV_SYMBOL_BATTERY_3 :
+                          s->batt > 30 ? LV_SYMBOL_BATTERY_2 :
+                          s->batt > 10 ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_EMPTY;
+        lv_label_set_text(sb_batt, sym);
+        lv_obj_set_style_text_color(sb_batt, lv_color_hex(s->batt > 20 ? CY_GREEN : CY_AMBER), 0);
+    } else {
+        lv_label_set_text(sb_batt, LV_SYMBOL_CHARGE);
+        lv_obj_set_style_text_color(sb_batt, lv_color_hex(CY_DIM), 0);
+    }
 }
 
 static void build_topbar(lv_obj_t *parent) {
@@ -136,22 +176,67 @@ static void build_topbar(lv_obj_t *parent) {
     lv_label_set_long_mode(tb_name, LV_LABEL_LONG_DOT);
     lv_obj_align(tb_name, LV_ALIGN_LEFT_MID, 40, 0);
 
-    /* cluster d'icônes + horloge à droite */
-    lv_obj_t *right = lv_obj_create(bar);
-    /* largeur fixe : un flex SIZE_CONTENT + FLEX_ALIGN_END rabote les premiers
-       enfants (USB/WiFi disparaissent, seule l'horloge survit) — bug de mesure LVGL */
-    lv_obj_set_size(right, 120, LV_PCT(100));
-    flat(right);
-    lv_obj_set_flex_flow(right, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(right, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(right, 8, 0);
-    lv_obj_align(right, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_clear_flag(right, LV_OBJ_FLAG_SCROLLABLE);
+    /* horloge à droite (les icônes d'état vivent désormais dans la barre verticale) */
+    tb_clock = label(bar, "--:--", FONT_MONO, CY_TEXT);
+    lv_obj_align(tb_clock, LV_ALIGN_RIGHT_MID, 0, 0);
+}
 
-    /* Icones toujours visibles, color = etat (dim si decoonnecte) */
-    tb_usb = label(right, LV_SYMBOL_USB, FONT_SMALL, CY_BORDER);
-    tb_wifi = label(right, LV_SYMBOL_WIFI, FONT_SMALL, CY_BORDER);
-    tb_clock = label(right, "--:--", FONT_MONO, CY_TEXT);
+/* Une entrée de la barre d'état : icône + valeur optionnelle dessous.
+   Renvoie le label icône ; *val_out (si non NULL) reçoit le label valeur. */
+static lv_obj_t *sb_item(lv_obj_t *parent, const char *icon, const char *val,
+                         uint32_t color, lv_obj_t **val_out) {
+    lv_obj_t *cell = lv_obj_create(parent);
+    lv_obj_set_size(cell, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(cell);
+    lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(cell, 1, 0);
+    lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *ic = label(cell, icon, FONT_BODY, color);
+    if (val_out) {
+        lv_obj_t *v = label(cell, val, FONT_SMALL, CY_DIM);
+        *val_out = v;
+    }
+    return ic;
+}
+
+/* Barre d'état verticale fixée à droite : icônes système + indicateurs LoRa. */
+static void build_statusbar(lv_obj_t *parent) {
+    lv_obj_t *sb = lv_obj_create(parent);
+    lv_obj_set_size(sb, 42, LV_PCT(100));
+    lv_obj_set_style_bg_color(sb, lv_color_hex(CY_PANEL), 0);
+    lv_obj_set_style_bg_opa(sb, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(sb, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(sb, 1, 0);
+    lv_obj_set_style_border_side(sb, LV_BORDER_SIDE_LEFT, 0);
+    lv_obj_set_style_radius(sb, 0, 0);
+    lv_obj_set_style_pad_top(sb, 8, 0);
+    lv_obj_set_style_pad_bottom(sb, 8, 0);
+    lv_obj_set_style_pad_left(sb, 0, 0);
+    lv_obj_set_style_pad_right(sb, 0, 0);
+    lv_obj_set_flex_flow(sb, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(sb, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(sb, 10, 0);
+    lv_obj_clear_flag(sb, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* --- système --- */
+    sb_usb  = sb_item(sb, LV_SYMBOL_USB,  NULL, CY_BORDER, NULL);
+    sb_wifi = sb_item(sb, LV_SYMBOL_WIFI, NULL, CY_BORDER, NULL);
+
+    /* séparateur */
+    lv_obj_t *sep = lv_obj_create(sb);
+    lv_obj_set_size(sep, 24, 1);
+    lv_obj_set_style_bg_color(sep, lv_color_hex(CY_BORDER), 0);
+    lv_obj_set_style_bg_opa(sep, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(sep, 0, 0);
+    lv_obj_set_style_radius(sep, 0, 0);
+
+    /* --- LoRa / mesh --- */
+    sb_link = sb_item(sb, LV_SYMBOL_GPS, NULL, CY_MAGENTA, NULL);    /* lien meshtasticd (couleur) */
+    sb_item(sb, LV_SYMBOL_LIST, "0",  CY_DIM, &sb_nodes);            /* nb nœuds (valeur) */
+    sb_item(sb, LV_SYMBOL_LOOP, "0%", CY_DIM, &sb_util);             /* util canal (valeur) */
+    sb_batt = sb_item(sb, LV_SYMBOL_CHARGE, NULL, CY_DIM, NULL);     /* batterie nœud (symbole) */
 }
 
 /* ---------------------------------------------------------------- vue CHAT */
@@ -1642,12 +1727,25 @@ void ui_init(void) {
     /* rafraîchissement des vues chat/nodes sur données Meshtastic entrantes */
     lv_timer_create(mesh_refresh_cb, 700, NULL);
 
-    content = lv_obj_create(scr);
-    lv_obj_set_width(content, LV_PCT(100));
+    /* corps = contenu (gauche, extensible) + barre d'état verticale (droite) */
+    lv_obj_t *body = lv_obj_create(scr);
+    lv_obj_set_width(body, LV_PCT(100));
+    lv_obj_set_flex_grow(body, 1);
+    flat(body);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(body, 0, 0);
+    lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+
+    content = lv_obj_create(body);
+    lv_obj_set_height(content, LV_PCT(100));
     lv_obj_set_flex_grow(content, 1);
     flat(content);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+
+    build_statusbar(body);
+    statusbar_refresh(NULL);
+    lv_timer_create(statusbar_refresh, 1500, NULL);
 
     /* clavier overlay sur le top layer : visible au-dessus de tout (chat + modaux) */
     kb = lv_keyboard_create(lv_layer_top());
