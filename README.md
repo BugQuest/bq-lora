@@ -307,6 +307,7 @@ meshtastic-screen/
 - [x] Topbar : nom du nœud + horloge
 - [x] **Barre d'état verticale** (bord gauche) : icônes système + indicateurs LoRa (voir légende ci-dessous)
 - [x] Onglet **CHAT** : canaux public + chiffrés, fil de messages avec ACK, clavier virtuel
+  - bouton **⚙ gestion des canaux** (bout de la rangée de canaux) → modal complet (voir ci-dessous)
 - [x] Onglet **NODES** : liste des nœuds **réels** (nom, SNR/RSSI, batterie, sauts, dernier contact)
 - [x] Onglet **SYS** :
   - INFO (hostname, IPs wlan/usb, uptime, CPU temp, RAM, disque, alim, kernel)
@@ -335,6 +336,29 @@ Fixée sur le bord **gauche** de l'écran, rafraîchie toutes les 1,5 s. De haut
 | ⚡ / batterie | Batterie du nœud | symbole batterie gradué (vert > 20 %, ambre sinon) ; éclair atténué si pas d'alim batterie (cas portduino sur secteur) |
 
 Les valeurs LoRa proviennent de `mesh_self()` (région, preset, batterie, utilisation canal, nœuds) alimenté par le flux protobuf de `meshtasticd`.
+
+#### Gestion des canaux (modal ⚙)
+
+Accessible depuis l'onglet **CHAT** via le bouton ⚙ en bout de la rangée de canaux. Le
+modal liste tous les canaux (icône cadenas + couleur magenta si chiffré, étiquette de
+rôle **PRIMAIRE** / **SECONDAIRE**) et offre une gestion complète, **sans CLI ni appli
+tierce** :
+
+| Action | Effet |
+|--------|-------|
+| **＋ PUBLIC** | crée un canal secondaire en clair (clé par défaut publique) |
+| **＋ CHIFFRÉ** | crée un canal secondaire avec une clé **AES256 aléatoire** (32 octets `/dev/urandom`) |
+| **RENOMMER** | renomme un canal (conserve clé et rôle) |
+| **PARTAGER** | affiche le **QR code + URL** `https://meshtastic.org/e/#…` à scanner depuis l'appli officielle |
+| **SUPPR.** | désactive un canal secondaire (le **primaire** est protégé : pas de bouton) |
+| **⬇ IMPORTER** | colle une URL `meshtastic.org/e/#…` pour ajouter le(s) canal(aux) qu'elle contient |
+
+Toutes les opérations passent par des **AdminMessage** (`set_channel`, encadrés par
+`begin_edit_settings` / `commit_edit_settings`) envoyés au nœud local sur le port ADMIN.
+La liste locale est rafraîchie ~1 s plus tard via un re-handshake `want_config`, ce qui
+met à jour le modal automatiquement (pas besoin de le rouvrir). L'URL de partage encode
+un `ChannelSet` protobuf (paramètres du canal + preset/région LoRa) en base64 *url-safe*,
+identique au format de l'application Meshtastic officielle.
 
 ### Sécurité
 

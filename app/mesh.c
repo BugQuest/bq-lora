@@ -34,6 +34,7 @@
 /* PortNums utiles */
 #define PORT_TEXT        1
 #define PORT_ROUTING     5
+#define PORT_ADMIN       6
 
 #define HEARTBEAT_SECS   30
 #define RECONNECT_SECS   5
@@ -58,6 +59,9 @@ typedef struct {
     int            index;   /* numéro de canal réel */
     mesh_channel_t pub;
     char           name[24];
+    uint8_t        psk[32]; /* clé du canal (conservée pour renommer/partager) */
+    size_t         psk_len;
+    int            role;    /* 0 désactivé, 1 primaire, 2 secondaire */
 } chan_slot_t;
 
 typedef struct {
@@ -79,10 +83,13 @@ static int         s_msg_count;
 static char        s_region[16] = "EU868";
 static char        s_preset[16] = "LongFast";
 static char        s_uptime[16] = "-";
+static uint32_t    s_region_code = 3;  /* EU_868 */
+static uint32_t    s_preset_code = 0;  /* LONG_FAST */
 static mesh_self_t s_self;
 
 static uint32_t    s_my_num;
 static bool        s_dirty;
+static time_t      s_reload_at;        /* != 0 : re-demander la config à cette date */
 
 /* ----------------------------------------------------------------- liaison */
 static int    s_fd = -1;
@@ -375,6 +382,7 @@ static void parse_channel(const uint8_t *d, size_t n)
     uint32_t f, w;
     int index = 0; uint32_t role = 0;
     char name[24] = ""; bool enc = false;
+    uint8_t psk[32]; size_t psk_len = 0;
     const uint8_t *settings = NULL; size_t setl = 0;
 
     while (pb_read_tag(&r, &f, &w)) {
@@ -384,7 +392,20 @@ static void parse_channel(const uint8_t *d, size_t n)
         else if (f == 3 && w == 0 && pb_read_varint(&r, &v)) role = (uint32_t)v;
         else pb_skip(&r, w);
     }
-    if (role == 0) return;   /* DISABLED */
+
+    /* DISABLED : retirer l'entrée si on l'avait (cas d'une suppression). */
+    if (role == 0) {
+        for (int i = 0; i < s_chan_count; i++) {
+            if (s_chans[i].index == index) {
+                memmove(&s_chans[i], &s_chans[i + 1],
+                        sizeof(s_chans[0]) * (s_chan_count - i - 1));
+                s_chan_count--;
+                s_dirty = true;
+                break;
+            }
+        }
+        return;
+    }
 
     if (settings) {
         pb_reader sr; pb_reader_init(&sr, settings, setl);
@@ -393,6 +414,8 @@ static void parse_channel(const uint8_t *d, size_t n)
             const uint8_t *b; size_t bl;
             if (sf == 2 && sw == 2 && pb_read_bytes(&sr, &b, &bl)) {
                 enc = (bl > 1);   /* psk > 1 octet = clé custom */
+                psk_len = bl < sizeof(psk) ? bl : sizeof(psk);
+                memcpy(psk, b, psk_len);
             } else if (sf == 3 && sw == 2 && pb_read_bytes(&sr, &b, &bl)) {
                 size_t k = bl < sizeof(name) - 1 ? bl : sizeof(name) - 1;
                 memcpy(name, b, k); name[k] = '\0';
@@ -413,8 +436,13 @@ static void parse_channel(const uint8_t *d, size_t n)
         c->index = index;
     }
     snprintf(c->name, sizeof(c->name), "%s", name);
-    c->pub.name = c->name;
-    c->pub.enc = enc;
+    memcpy(c->psk, psk, psk_len);
+    c->psk_len = psk_len;
+    c->role = (int)role;
+    c->pub.name  = c->name;
+    c->pub.enc   = enc;
+    c->pub.index = (uint8_t)index;
+    c->pub.role  = (uint8_t)role;
     s_dirty = true;
 }
 
@@ -430,9 +458,11 @@ static void parse_config(const uint8_t *d, size_t n)
             while (pb_read_tag(&lr, &lf, &lw)) {
                 uint64_t v;
                 if (lf == 2 && lw == 0 && pb_read_varint(&lr, &v)) {
+                    s_preset_code = (uint32_t)v;
                     snprintf(s_preset, sizeof(s_preset), "%s", preset_str((uint32_t)v));
                     s_self.preset = s_preset;
                 } else if (lf == 7 && lw == 0 && pb_read_varint(&lr, &v)) {
+                    s_region_code = (uint32_t)v;
                     snprintf(s_region, sizeof(s_region), "%s", region_str((uint32_t)v));
                     s_self.region = s_region;
                 } else {
@@ -667,6 +697,12 @@ void mesh_poll(void)
     mesh_drain();
     if (s_fd < 0) return;
 
+    /* recharger la config après une modification de canal (laisse le nœud committer) */
+    if (s_reload_at && now >= s_reload_at) {
+        s_reload_at = 0;
+        send_want_config();
+    }
+
     if (now - s_last_hb >= HEARTBEAT_SECS) {
         send_heartbeat();
         s_last_hb = now;
@@ -726,4 +762,263 @@ const mesh_self_t *mesh_self(void)
 {
     s_self.nodes = s_node_count;
     return &s_self;
+}
+
+/* ============================================================ gestion canaux */
+
+/* --- base64 url-safe (RFC 4648 §5), sans padding --- */
+static const char B64[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+static size_t b64url_encode(const uint8_t *in, size_t n, char *out, size_t cap)
+{
+    size_t o = 0;
+    for (size_t i = 0; i < n; i += 3) {
+        int rem = (int)(n - i);
+        uint32_t v = (uint32_t)in[i] << 16;
+        if (rem > 1) v |= (uint32_t)in[i + 1] << 8;
+        if (rem > 2) v |= (uint32_t)in[i + 2];
+        int chars = rem >= 3 ? 4 : rem + 1;     /* 1->2, 2->3, 3->4 (sans padding) */
+        for (int k = 0; k < chars && o < cap - 1; k++)
+            out[o++] = B64[(v >> (18 - 6 * k)) & 0x3f];
+    }
+    out[o] = '\0';
+    return o;
+}
+
+static int b64val(char c)
+{
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+' || c == '-') return 62;
+    if (c == '/' || c == '_') return 63;
+    return -1;                                   /* '=', espaces, etc. : ignorés */
+}
+
+static size_t b64_decode(const char *in, uint8_t *out, size_t cap)
+{
+    uint32_t acc = 0; int bits = 0; size_t o = 0;
+    for (const char *p = in; *p; p++) {
+        int v = b64val(*p);
+        if (v < 0) continue;
+        acc = (acc << 6) | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            if (o < cap) out[o++] = (uint8_t)((acc >> bits) & 0xff);
+        }
+    }
+    return o;
+}
+
+static void fill_random(uint8_t *buf, size_t n)
+{
+    int fd = open("/dev/urandom", O_RDONLY);
+    size_t got = 0;
+    if (fd >= 0) {
+        while (got < n) {
+            ssize_t k = read(fd, buf + got, n - got);
+            if (k <= 0) break;
+            got += (size_t)k;
+        }
+        close(fd);
+    }
+    for (; got < n; got++) buf[got] = (uint8_t)(rand() & 0xff);  /* repli */
+}
+
+/* --- envoi d'un AdminMessage au nœud local (to = soi-même, portnum ADMIN) --- */
+static void send_admin(const uint8_t *admin, size_t alen)
+{
+    if (s_fd < 0 || s_my_num == 0) return;
+
+    uint8_t data[300];
+    pb_writer dw; pb_writer_init(&dw, data, sizeof(data));
+    pb_field_varint(&dw, 1, PORT_ADMIN);          /* Data.portnum = ADMIN_APP */
+    pb_field_bytes (&dw, 2, admin, alen);         /* Data.payload = AdminMessage */
+
+    uint8_t pkt[360];
+    pb_writer pw; pb_writer_init(&pw, pkt, sizeof(pkt));
+    pb_field_fixed32(&pw, 2, s_my_num);           /* MeshPacket.to = nœud local */
+    pb_field_varint (&pw, 3, 0);                  /* channel 0 */
+    pb_field_bytes  (&pw, 4, data, dw.len);       /* decoded */
+    pb_field_fixed32(&pw, 6, (uint32_t)rand() ^ (uint32_t)time(NULL));
+
+    uint8_t tr[420];
+    pb_writer tw; pb_writer_init(&tw, tr, sizeof(tr));
+    pb_field_bytes(&tw, 1, pkt, pw.len);          /* ToRadio.packet */
+
+    if (!dw.ovf && !pw.ovf && !tw.ovf) send_frame(tr, tw.len);
+}
+
+static void admin_flag(uint32_t field)            /* begin(64)/commit(65)_edit_settings */
+{
+    uint8_t am[8];
+    pb_writer aw; pb_writer_init(&aw, am, sizeof(am));
+    pb_field_bool(&aw, field, true);
+    send_admin(am, aw.len);
+}
+
+/* AdminMessage{ set_channel(33): Channel{index, settings{psk,name}, role} } */
+static void admin_set_channel(int index, const char *name,
+                              const uint8_t *psk, size_t psk_len, int role)
+{
+    uint8_t cs[80];
+    pb_writer cw; pb_writer_init(&cw, cs, sizeof(cs));
+    pb_field_bytes(&cw, 2, psk, psk_len);
+    if (name && name[0]) pb_field_bytes(&cw, 3, (const uint8_t *)name, strlen(name));
+
+    uint8_t ch[120];
+    pb_writer hw; pb_writer_init(&hw, ch, sizeof(ch));
+    pb_field_varint(&hw, 1, (uint32_t)index);
+    pb_field_bytes (&hw, 2, cs, cw.len);
+    pb_field_varint(&hw, 3, (uint32_t)role);
+
+    uint8_t am[160];
+    pb_writer aw; pb_writer_init(&aw, am, sizeof(am));
+    pb_field_bytes(&aw, 33, ch, hw.len);
+    send_admin(am, aw.len);
+}
+
+static void schedule_reload(void) { s_reload_at = time(NULL) + 1; }
+
+/* premier index libre dans [1..MAX_CHANS-1] non utilisé localement, -1 si plein */
+static int free_channel_index(void)
+{
+    for (int idx = 1; idx < MAX_CHANS; idx++) {
+        bool used = false;
+        for (int i = 0; i < s_chan_count; i++)
+            if (s_chans[i].index == idx) { used = true; break; }
+        if (!used) return idx;
+    }
+    return -1;
+}
+
+bool mesh_channel_create(const char *name, bool encrypted)
+{
+    if (!mesh_connected() || !name || !name[0]) return false;
+    int idx = free_channel_index();
+    if (idx < 0) return false;
+
+    uint8_t psk[32]; size_t plen;
+    if (encrypted) { fill_random(psk, 32); plen = 32; }
+    else           { psk[0] = 0x01;        plen = 1; }   /* clé par défaut -> public */
+
+    admin_flag(64);
+    admin_set_channel(idx, name, psk, plen, 2 /*SECONDARY*/);
+    admin_flag(65);
+    schedule_reload();
+    return true;
+}
+
+bool mesh_channel_rename(int i, const char *name)
+{
+    if (!mesh_connected() || i < 0 || i >= s_chan_count || !name || !name[0]) return false;
+    chan_slot_t *c = &s_chans[i];
+    admin_flag(64);
+    admin_set_channel(c->index, name, c->psk, c->psk_len, c->role);
+    admin_flag(65);
+    schedule_reload();
+    return true;
+}
+
+bool mesh_channel_delete(int i)
+{
+    if (!mesh_connected() || i < 0 || i >= s_chan_count) return false;
+    chan_slot_t *c = &s_chans[i];
+    if (c->role == 1) return false;                      /* primaire non supprimable */
+    admin_flag(64);
+    admin_set_channel(c->index, NULL, NULL, 0, 0 /*DISABLED*/);
+    admin_flag(65);
+    schedule_reload();
+    return true;
+}
+
+const char *mesh_channel_share_url(int i)
+{
+    static char url[256];
+    if (i < 0 || i >= s_chan_count) return NULL;
+    chan_slot_t *c = &s_chans[i];
+
+    uint8_t cs[80];                                      /* ChannelSettings{psk,name} */
+    pb_writer cw; pb_writer_init(&cw, cs, sizeof(cs));
+    pb_field_bytes(&cw, 2, c->psk, c->psk_len);
+    pb_field_bytes(&cw, 3, (const uint8_t *)c->name, strlen(c->name));
+
+    uint8_t lc[16];                                      /* LoRaConfig{preset,region} */
+    pb_writer lw; pb_writer_init(&lw, lc, sizeof(lc));
+    pb_field_varint(&lw, 2, s_preset_code);
+    pb_field_varint(&lw, 7, s_region_code);
+
+    uint8_t set[128];                                    /* ChannelSet{settings,lora} */
+    pb_writer sw; pb_writer_init(&sw, set, sizeof(set));
+    pb_field_bytes(&sw, 1, cs, cw.len);
+    pb_field_bytes(&sw, 2, lc, lw.len);
+    if (cw.ovf || lw.ovf || sw.ovf) return NULL;
+
+    const char *prefix = "https://meshtastic.org/e/#";
+    size_t pn = strlen(prefix);
+    memcpy(url, prefix, pn);
+    b64url_encode(set, sw.len, url + pn, sizeof(url) - pn);
+    return url;
+}
+
+int mesh_channel_import_url(const char *url)
+{
+    if (!mesh_connected() || !url) return -1;
+
+    const char *frag = strrchr(url, '#');
+    frag = frag ? frag + 1 : url;                        /* tolère donnée brute */
+
+    uint8_t buf[256];
+    size_t n = b64_decode(frag, buf, sizeof(buf));
+    if (n < 2) return -1;
+
+    bool assigned[MAX_CHANS] = { false };
+    pb_reader r; pb_reader_init(&r, buf, n);
+    uint32_t f, w;
+    int added = 0;
+    while (pb_read_tag(&r, &f, &w)) {
+        const uint8_t *b; size_t bl;
+        if (f == 1 && w == 2 && pb_read_bytes(&r, &b, &bl)) {   /* ChannelSettings */
+            pb_reader sr; pb_reader_init(&sr, b, bl);
+            uint32_t sf, sw2;
+            uint8_t psk[32]; size_t plen = 0; char name[24] = "";
+            while (pb_read_tag(&sr, &sf, &sw2)) {
+                const uint8_t *sb; size_t sbl;
+                if (sf == 2 && sw2 == 2 && pb_read_bytes(&sr, &sb, &sbl)) {
+                    plen = sbl < sizeof(psk) ? sbl : sizeof(psk);
+                    memcpy(psk, sb, plen);
+                } else if (sf == 3 && sw2 == 2 && pb_read_bytes(&sr, &sb, &sbl)) {
+                    size_t k = sbl < sizeof(name) - 1 ? sbl : sizeof(name) - 1;
+                    memcpy(name, sb, k); name[k] = '\0';
+                } else {
+                    pb_skip(&sr, sw2);
+                }
+            }
+            if (!name[0]) continue;                          /* sans nom : ignoré */
+            bool exists = false;
+            for (int k = 0; k < s_chan_count; k++)
+                if (strcmp(s_chans[k].name, name) == 0) { exists = true; break; }
+            if (exists) continue;
+
+            int idx = -1;                                    /* index libre (local + batch) */
+            for (int t = 1; t < MAX_CHANS; t++) {
+                bool used = assigned[t];
+                for (int k = 0; !used && k < s_chan_count; k++)
+                    if (s_chans[k].index == t) used = true;
+                if (!used) { idx = t; break; }
+            }
+            if (idx < 0) break;
+
+            if (added == 0) admin_flag(64);
+            admin_set_channel(idx, name, psk, plen, 2);
+            assigned[idx] = true;
+            added++;
+        } else {
+            pb_skip(&r, w);
+        }
+    }
+    if (added) { admin_flag(65); schedule_reload(); }
+    return added;
 }

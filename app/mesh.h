@@ -22,6 +22,8 @@ typedef struct {
 typedef struct {
     const char *name;      /* nom du canal */
     bool        enc;       /* true = chiffré (PSK custom), false = public */
+    uint8_t     index;     /* index réel Meshtastic (0 = primaire) */
+    uint8_t     role;      /* 0 désactivé, 1 primaire, 2 secondaire */
 } mesh_channel_t;
 
 typedef struct {
@@ -46,6 +48,29 @@ typedef struct {
 
 int                 mesh_channel_count(void);
 const mesh_channel_t *mesh_channel(int i);
+
+/* ---- Gestion des canaux (configure le nœud local via AdminMessage) ----
+ * Toutes ces fonctions émettent vers meshtasticd ; la liste locale est
+ * rafraîchie ~1 s plus tard (re-handshake), donc mesh_take_dirty() repassera
+ * à true quand les changements seront pris en compte. */
+
+/* Crée un canal secondaire au premier index libre.
+ * encrypted=true -> PSK AES256 aléatoire ; false -> canal public (clé par défaut).
+ * Retourne false si plus d'index libre ou nœud non prêt. */
+bool mesh_channel_create(const char *name, bool encrypted);
+
+/* Renomme le canal en position i (conserve clé + rôle). */
+bool mesh_channel_rename(int i, const char *name);
+
+/* Supprime (désactive) le canal secondaire en position i. Refuse le primaire. */
+bool mesh_channel_delete(int i);
+
+/* URL de partage "https://meshtastic.org/e/#..." du canal en position i.
+ * Renvoie un pointeur vers un buffer interne (écrasé à chaque appel), NULL si erreur. */
+const char *mesh_channel_share_url(int i);
+
+/* Importe le(s) canal(aux) d'une URL collée. Retourne le nombre ajouté, -1 si URL invalide. */
+int  mesh_channel_import_url(const char *url);
 
 int                 mesh_node_count(void);
 const mesh_node_t  *mesh_node(int i);
