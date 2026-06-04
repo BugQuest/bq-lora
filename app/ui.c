@@ -27,6 +27,7 @@ enum {
     APP_BADUSB  = 6,
     APP_BT      = 7,
     APP_ABOUT   = 8,
+    APP_CAMERA  = 9,
 };
 
 static lv_obj_t *content;          /* zone centrale, reconstruite par app */
@@ -1986,9 +1987,14 @@ static void build_home(void);
 static void build_hotspot_app(void);
 static void build_badusb_app(void);
 static void build_about(void);
+static void build_camera(void);
+static lv_obj_t *cam_canvas, *cam_status, *cam_btn;   /* fwd : nullifies au changement d'onglet */
 
 static void show_tab(int app) {
     if (sys_refresh_timer) { lv_timer_delete(sys_refresh_timer); sys_refresh_timer = NULL; }
+    /* arrete le flux camera live et oublie ses widgets avant de nettoyer content */
+    sys_cam_stream_stop();
+    cam_canvas = NULL; cam_status = NULL; cam_btn = NULL;
     /* null tous les pointeurs vers des labels qu'on s'apprete a liberer */
     sys_lbl_host = NULL;
     sys_lbl_wifi = NULL;
@@ -2034,6 +2040,7 @@ static void show_tab(int app) {
         case APP_HOTSPOT: build_hotspot_app();   break;
         case APP_BADUSB:  build_badusb_app();    break;
         case APP_ABOUT:   build_about();         break;
+        case APP_CAMERA:  build_camera();        break;
         case APP_WIFI:
             /* WIFI = modal flottant ; on reste conceptuellement sur HOME */
             cur_tab = APP_HOME;
@@ -2073,6 +2080,7 @@ static const app_card_t HOME_APPS[] = {
     { APP_BT,      "BLUETOOTH",LV_SYMBOL_BLUETOOTH, CY_CYAN    },
     { APP_HOTSPOT, "HOTSPOT",  LV_SYMBOL_IMAGE,    CY_MAGENTA },
     { APP_BADUSB,  "BAD USB",  LV_SYMBOL_USB,      CY_MAGENTA },
+    { APP_CAMERA,  "CAMERA",   LV_SYMBOL_IMAGE,    CY_GREEN   },
     { APP_SYS,     "SYSTEME",  LV_SYMBOL_SETTINGS, CY_AMBER   },
     { APP_ABOUT,   "A PROPOS", LV_SYMBOL_LIST,     CY_AMBER   },
 };
@@ -2382,6 +2390,109 @@ static void build_about(void) {
     lv_obj_t *gh = label(pr, "github.com/BugQuest/bq-lora", FONT_SMALL, CY_CYAN);
     lv_obj_set_width(gh, LV_PCT(100));
     lv_label_set_long_mode(gh, LV_LABEL_LONG_DOT);
+}
+
+/* ---------------------------------------------------------------- app CAMERA */
+/* Viewfinder live : rpicam-vid pousse des frames YUV420 que sys.c convertit en
+ * RGB565 directement dans cam_pv_buf, puis invalide le canvas (~12 fps).
+ * Le bouton CAPTURE coupe brievement le flux (camera mono-acces), prend une
+ * photo pleine resolution sur le disque, puis le live reprend.
+ * Largeur multiple de 64 (256) -> frame YUV420 compacte, sans padding de stride. */
+#define CAM_PV_W 256
+#define CAM_PV_H 192
+static uint8_t   cam_pv_buf[CAM_PV_W * CAM_PV_H * 2] __attribute__((aligned(4)));
+/* cam_canvas / cam_status / cam_btn : declares avant show_tab */
+static bool      cam_busy;
+
+/* thread UI : une frame live vient d'etre ecrite dans cam_pv_buf */
+static void cam_frame_cb(void *user) {
+    (void)user;
+    if (cam_canvas) lv_obj_invalidate(cam_canvas);
+}
+
+static void cam_stream_resume(void) {
+    if (cam_canvas && !sys_cam_stream_active())
+        sys_cam_stream_start(cam_pv_buf, CAM_PV_W, CAM_PV_H, cam_frame_cb, NULL);
+}
+
+static void cam_capture_done(bool ok, const char *photo,
+                             const char *preview, void *user) {
+    (void)preview; (void)user;
+    cam_busy = false;
+    if (cam_btn) lv_obj_clear_state(cam_btn, LV_STATE_DISABLED);
+    if (cam_status) {
+        if (ok) {
+            const char *base = strrchr(photo, '/');
+            char b[96];
+            snprintf(b, sizeof(b), LV_SYMBOL_OK "  %s", base ? base + 1 : photo);
+            lv_label_set_text(cam_status, b);
+            lv_obj_set_style_text_color(cam_status, lv_color_hex(CY_GREEN), 0);
+        } else {
+            lv_label_set_text(cam_status, LV_SYMBOL_WARNING "  echec de capture");
+            lv_obj_set_style_text_color(cam_status, lv_color_hex(CY_MAGENTA), 0);
+        }
+    }
+    cam_stream_resume();   /* le live reprend (si on est toujours sur la page) */
+}
+
+static void cam_capture_cb(lv_event_t *e) {
+    (void)e;
+    if (cam_busy) return;
+    cam_busy = true;
+    if (cam_btn) lv_obj_add_state(cam_btn, LV_STATE_DISABLED);
+    if (cam_status) {
+        lv_label_set_text(cam_status, LV_SYMBOL_REFRESH "  capture HD...");
+        lv_obj_set_style_text_color(cam_status, lv_color_hex(CY_AMBER), 0);
+    }
+    /* camera mono-acces : on coupe le flux live pendant la photo pleine resolution */
+    sys_cam_stream_stop();
+    sys_cam_capture_async(CAM_PV_W, CAM_PV_H, cam_capture_done, NULL);
+}
+
+static void build_camera(void) {
+    cam_canvas = NULL; cam_status = NULL; cam_btn = NULL;
+
+    lv_obj_t *col = lv_obj_create(content);
+    lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
+    flat(col);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(col, 10, 0);
+    lv_obj_set_style_pad_row(col, 10, 0);
+    lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+
+    label(col, "CAMERA", FONT_BIG, CY_GREEN);
+
+    /* cadre + canvas de preview */
+    lv_obj_t *frame = lv_obj_create(col);
+    lv_obj_set_size(frame, CAM_PV_W + 6, CAM_PV_H + 6);
+    panel(frame, CY_BORDER);
+    lv_obj_set_style_pad_all(frame, 2, 0);
+    lv_obj_clear_flag(frame, LV_OBJ_FLAG_SCROLLABLE);
+
+    cam_canvas = lv_canvas_create(frame);
+    lv_canvas_set_buffer(cam_canvas, cam_pv_buf, CAM_PV_W, CAM_PV_H,
+                         LV_COLOR_FORMAT_RGB565);
+    lv_obj_center(cam_canvas);
+    lv_canvas_fill_bg(cam_canvas, lv_color_black(), LV_OPA_COVER);
+
+    cam_status = label(col, "flux live...", FONT_SMALL, CY_DIM);
+    lv_obj_set_width(cam_status, LV_PCT(100));
+    lv_label_set_long_mode(cam_status, LV_LABEL_LONG_DOT);
+
+    lv_obj_t *row = lv_obj_create(col);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(row);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, 6, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    cam_btn = small_button(row, LV_SYMBOL_IMAGE "  CAPTURE", CY_GREEN, cam_capture_cb);
+
+    cam_busy = false;
+
+    /* demarre le viewfinder live */
+    sys_cam_stream_start(cam_pv_buf, CAM_PV_W, CAM_PV_H, cam_frame_cb, NULL);
 }
 
 /* ---------------------------------------------------------------- splash */

@@ -24,3 +24,8 @@ dtoverlay=ads7846,cs=1,penirq=5,penirq_pull=2,speed=2000000,xohms=150,swapxy=1
 # piloté en GPIO par meshtasticd). meshtasticd n'utilise PAS le CE matériel :
 # il toggle CS/IRQ/Busy/Reset en libgpiod (cf. config/lora.yaml).
 dtoverlay=spi1-1cs,cs0_pin=26
+
+# === Caméra CSI Freenove IMX219 (8 MP, 3280x2464, objectif 120°) ===
+# L'auto-détection (camera_auto_detect) échoue sur ce clone -> overlay explicite.
+# Le capteur est en i2c 0x10 sur le mux CSI ; capture via rpicam-apps/libcamera.
+dtoverlay=imx219

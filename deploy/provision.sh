@@ -14,7 +14,7 @@ echo "=== provision $(date) ==="
 # Dépendances (filet : cloud-init peut planter sur des 404 de mirroir)
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y || true
-apt-get install -y build-essential cmake git python3-pil python3-gpiozero dosfstools
+apt-get install -y build-essential cmake git python3-pil python3-gpiozero dosfstools rpicam-apps
 
 # LVGL (v9.2) — les sources buildables vivent dans $SRC/app (layout du dépôt).
 # LVGL et lv_conf.h doivent donc être visibles depuis app/.
@@ -136,6 +136,19 @@ if ! grep -q "spi1-1cs,cs0_pin=26" /boot/firmware/config.txt; then
 dtoverlay=spi1-1cs,cs0_pin=26
 EOF
 fi
+
+# === Camera CSI Freenove IMX219 (8MP 3280x2464, objectif 120 deg) ===
+# camera_auto_detect echoue sur ce clone -> overlay explicite. La capture passe
+# par rpicam-apps/libcamera (cf. app/sys.c sys_cam_capture_async + tools/cam.py).
+if ! grep -q "dtoverlay=imx219" /boot/firmware/config.txt; then
+    cat >> /boot/firmware/config.txt <<'EOF'
+
+# === Camera CSI Freenove IMX219 (8MP 3280x2464, objectif 120 deg) ===
+dtoverlay=imx219
+EOF
+fi
+# Dossier de stockage des photos prises depuis l'UI
+install -d -o "$U" -g "$U" "$SRC/photos"
 
 # Depot meshtasticd (OBS) : pas de canal stable pour trixie -> on prend beta/Debian_13
 apt-get install -y gnupg curl ca-certificates

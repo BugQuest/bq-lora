@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 
 /* Infos système instantanées (pour l'onglet SYS). */
 typedef struct {
@@ -58,6 +59,28 @@ void sys_usb_mode_set_async(usb_mode_t mode, usb_mode_cb_t cb, void *user);
 /* Lance un script BadUSB (ducky-like) via /dev/hidg0. */
 typedef void (*badusb_cb_t)(bool ok, void *user);
 void sys_badusb_run_async(const char *script_path, badusb_cb_t cb, void *user);
+
+/* Camera CSI (IMX219) : prend une photo (sauvegardee dans ~/meshui/photos/) et
+ * en genere une preview brute RGB565 (prev_w x prev_h) pour un canvas LVGL.
+ * Le callback est rappele sur le thread UI ; photo_path/preview_path pointent
+ * sur des buffers valides uniquement pendant l'appel. */
+typedef void (*cam_capture_cb_t)(bool ok, const char *photo_path,
+                                 const char *preview_path, void *user);
+void sys_cam_capture_async(int prev_w, int prev_h,
+                           cam_capture_cb_t cb, void *user);
+
+/* Flux video live (viewfinder). Lance rpicam-vid en YUV420, convertit chaque
+ * frame en RGB565 directement dans 'buf' (w*h*2 octets, fourni par l'UI), puis
+ * appelle on_frame() sur le thread UI pour invalider le canvas.
+ * 'w' doit etre un multiple de 64 (et 'h' pair) pour eviter le padding de
+ * stride de libcamera : la frame est alors compacte (w*h*3/2 octets).
+ * La camera etant mono-acces, arreter le flux (sys_cam_stream_stop) avant
+ * d'appeler sys_cam_capture_async. */
+typedef void (*cam_frame_cb_t)(void *user);
+void sys_cam_stream_start(uint8_t *buf, int w, int h,
+                          cam_frame_cb_t on_frame, void *user);
+void sys_cam_stream_stop(void);
+bool sys_cam_stream_active(void);
 
 /* Change le fuseau horaire systeme (timedatectl set-timezone). */
 void sys_set_timezone(const char *tz);

@@ -23,6 +23,9 @@ app/lv_conf.h
 config.ini
 touch.cal
 
+# Photos prises depuis l'UI caméra (runtime, jamais versionné)
+/photos/
+
 # Divers OS
 .DS_Store
 Thumbs.db

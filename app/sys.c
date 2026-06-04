@@ -6,6 +6,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
+#include <stdint.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 #define CTL "/usr/bin/sudo /usr/local/sbin/meshui-ctl"
 
@@ -270,6 +276,212 @@ void sys_badusb_run_async(const char *path, badusb_cb_t cb, void *user)
     c->cb = cb; c->user = user;
     strncpy(c->path, path, sizeof(c->path) - 1);
     pthread_t t; pthread_create(&t, NULL, bu_thread, c); pthread_detach(t);
+}
+
+/* ---------- Camera CSI (IMX219) ---------- */
+#define PHOTO_DIR   "/home/bq-lora/meshui/photos"
+#define CAM_PREVIEW "/tmp/meshui-cam.rgb565"
+
+typedef struct {
+    cam_capture_cb_t cb; void *user;
+    int  w, h;
+    char photo[256], preview[256];
+    bool ok;
+} cam_ctx_t;
+
+static void cam_deliver(void *a)
+{
+    cam_ctx_t *c = a;
+    if (c->cb) c->cb(c->ok, c->photo, c->preview, c->user);
+    free(c);
+}
+
+static void *cam_thread(void *a)
+{
+    cam_ctx_t *c = a;
+    char cmd[768];
+
+    if (system("mkdir -p " PHOTO_DIR) != 0) { /* non bloquant */ }
+
+    /* nom de fichier horodate */
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char ts[32]; strftime(ts, sizeof(ts), "%Y%m%d_%H%M%S", &tm);
+    snprintf(c->photo, sizeof(c->photo), PHOTO_DIR "/cam_%s.jpg", ts);
+    strncpy(c->preview, CAM_PREVIEW, sizeof(c->preview) - 1);
+
+    /* capture pleine FoV binnee 1640x1232 (mode rapide de l'IMX219).
+     * -n : pas de fenetre de preview ; -t : laisse l'auto-expo se stabiliser. */
+    snprintf(cmd, sizeof(cmd),
+             "rpicam-still -n -t 1200 --width 1640 --height 1232 -o '%s' "
+             ">/dev/null 2>&1", c->photo);
+    bool cap = (system(cmd) == 0);
+
+    /* preview brute RGB565 pour le canvas LVGL */
+    bool prev = false;
+    if (cap) {
+        snprintf(cmd, sizeof(cmd),
+                 "/usr/bin/python3 /home/bq-lora/meshui/tools/cam.py '%s' '%s' %d %d "
+                 ">/dev/null 2>&1", c->photo, c->preview, c->w, c->h);
+        prev = (system(cmd) == 0);
+    }
+
+    c->ok = cap && prev;
+    lv_async_call(cam_deliver, c);
+    return NULL;
+}
+
+void sys_cam_capture_async(int prev_w, int prev_h, cam_capture_cb_t cb, void *user)
+{
+    cam_ctx_t *c = calloc(1, sizeof(*c));
+    c->cb = cb; c->user = user; c->w = prev_w; c->h = prev_h;
+    pthread_t t; pthread_create(&t, NULL, cam_thread, c); pthread_detach(t);
+}
+
+/* ---------- Camera : flux live (viewfinder) ---------- */
+static volatile int   cam_stream_run;
+static pthread_t      cam_stream_tid;
+static pid_t          cam_stream_pid = -1;
+static int            cam_stream_fd  = -1;
+static uint8_t       *cam_stream_buf;
+static int            cam_stream_w, cam_stream_h;
+static cam_frame_cb_t cam_stream_cb;
+static void          *cam_stream_user;
+static volatile int   cam_frame_pending;
+
+static inline uint8_t clamp8(int v) { return v < 0 ? 0 : (v > 255 ? 255 : (uint8_t)v); }
+
+/* rappelle (thread UI) le callback fourni par l'UI pour invalider le canvas */
+static void cam_frame_deliver(void *unused)
+{
+    (void)unused;
+    cam_frame_pending = 0;
+    if (cam_stream_cb && cam_stream_run) cam_stream_cb(cam_stream_user);
+}
+
+/* lit exactement n octets : 1 = ok, 0 = EOF, -1 = erreur */
+static int read_full(int fd, uint8_t *p, size_t n)
+{
+    size_t got = 0;
+    while (got < n) {
+        ssize_t r = read(fd, p + got, n - got);
+        if (r > 0) { got += (size_t)r; continue; }
+        if (r == 0) return 0;
+        if (errno == EINTR) continue;
+        return -1;
+    }
+    return 1;
+}
+
+static void *cam_stream_thread(void *a)
+{
+    (void)a;
+    int w = cam_stream_w, h = cam_stream_h;
+    size_t ysz = (size_t)w * h;
+    size_t csz = (size_t)(w / 2) * (h / 2);
+    size_t fsz = ysz + 2 * csz;                 /* YUV420 compact */
+    uint8_t *frame = malloc(fsz);
+    if (!frame) return NULL;
+
+    while (cam_stream_run) {
+        int r = read_full(cam_stream_fd, frame, fsz);
+        if (r <= 0) break;
+
+        const uint8_t *Y = frame;
+        const uint8_t *U = frame + ysz;
+        const uint8_t *V = U + csz;
+        uint16_t *out = (uint16_t *)cam_stream_buf;
+
+        for (int y = 0; y < h; y++) {
+            const uint8_t *yr = Y + (size_t)y * w;
+            const uint8_t *ur = U + (size_t)(y / 2) * (w / 2);
+            const uint8_t *vr = V + (size_t)(y / 2) * (w / 2);
+            uint16_t      *orow = out + (size_t)y * w;
+            for (int x = 0; x < w; x++) {
+                int C = (int)yr[x] - 16;
+                int D = (int)ur[x >> 1] - 128;
+                int E = (int)vr[x >> 1] - 128;
+                uint8_t R = clamp8((298 * C + 409 * E + 128) >> 8);
+                uint8_t G = clamp8((298 * C - 100 * D - 208 * E + 128) >> 8);
+                uint8_t B = clamp8((298 * C + 516 * D + 128) >> 8);
+                orow[x] = (uint16_t)(((R & 0xF8) << 8) |
+                                     ((G & 0xFC) << 3) |
+                                     ( B >> 3));
+            }
+        }
+
+        if (!cam_frame_pending) {
+            cam_frame_pending = 1;
+            lv_async_call(cam_frame_deliver, NULL);
+        }
+    }
+    free(frame);
+    return NULL;
+}
+
+void sys_cam_stream_start(uint8_t *buf, int w, int h,
+                          cam_frame_cb_t on_frame, void *user)
+{
+    if (cam_stream_run) return;                 /* deja actif */
+
+    cam_stream_buf  = buf;
+    cam_stream_w    = w;
+    cam_stream_h    = h;
+    cam_stream_cb   = on_frame;
+    cam_stream_user = user;
+    cam_frame_pending = 0;
+
+    /* formate les arguments avant fork (snprintf n'est pas async-signal-safe) */
+    char ws[8], hs[8];
+    snprintf(ws, sizeof ws, "%d", w);
+    snprintf(hs, sizeof hs, "%d", h);
+
+    int fds[2];
+    if (pipe(fds) != 0) return;
+
+    pid_t pid = fork();
+    if (pid < 0) { close(fds[0]); close(fds[1]); return; }
+    if (pid == 0) {
+        /* enfant : stdout -> pipe, stderr -> /dev/null, exec rpicam-vid */
+        dup2(fds[1], STDOUT_FILENO);
+        int dn = open("/dev/null", O_WRONLY);
+        if (dn >= 0) { dup2(dn, STDERR_FILENO); close(dn); }
+        close(fds[0]); close(fds[1]);
+        execlp("rpicam-vid", "rpicam-vid", "-n", "-t", "0",
+               "--framerate", "12", "--width", ws, "--height", hs,
+               "--codec", "yuv420", "--flush", "-o", "-", (char *)NULL);
+        _exit(127);
+    }
+
+    /* parent */
+    close(fds[1]);
+    cam_stream_fd  = fds[0];
+    cam_stream_pid = pid;
+    cam_stream_run = 1;
+    if (pthread_create(&cam_stream_tid, NULL, cam_stream_thread, NULL) != 0) {
+        cam_stream_run = 0;
+        kill(pid, SIGTERM); waitpid(pid, NULL, 0);
+        close(cam_stream_fd); cam_stream_fd = -1; cam_stream_pid = -1;
+    }
+}
+
+void sys_cam_stream_stop(void)
+{
+    if (!cam_stream_run && cam_stream_pid < 0) return;
+
+    cam_stream_run = 0;
+    if (cam_stream_pid > 0) kill(cam_stream_pid, SIGTERM);
+    pthread_join(cam_stream_tid, NULL);          /* le SIGTERM -> EOF debloque read() */
+    if (cam_stream_fd >= 0) { close(cam_stream_fd); cam_stream_fd = -1; }
+    if (cam_stream_pid > 0) waitpid(cam_stream_pid, NULL, 0);
+    cam_stream_pid = -1;
+
+    lv_async_call_cancel(cam_frame_deliver, NULL);
+    cam_frame_pending = 0;
+}
+
+bool sys_cam_stream_active(void)
+{
+    return cam_stream_run != 0;
 }
 
 #define PWM_DUTY   "/sys/class/pwm/pwmchip0/pwm0/duty_cycle"
