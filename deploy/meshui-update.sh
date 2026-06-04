@@ -7,20 +7,31 @@ set -e
 U=bq-lora
 SRC=/home/$U/meshui
 LOG=/var/log/meshui-update.log
+PROGRESS=/tmp/meshui-update.progress
+
+# Publie un jalon de progression (0..100) lu par l'UI pour la barre de chargement.
+progress() { echo "$1" > "$PROGRESS" 2>/dev/null; chmod 644 "$PROGRESS" 2>/dev/null || true; }
+# En cas d'echec (set -e), marque -1 pour que l'UI affiche l'erreur.
+trap 'progress -1' ERR
 
 exec >>"$LOG" 2>&1
 echo "=== update $(date) ==="
 
+progress 5
 cd "$SRC"
 
 # Fast-forward depuis origin/master (descarte les modifs locales)
 sudo -u "$U" git fetch -q origin master
+progress 15
 sudo -u "$U" git reset --hard origin/master
+progress 25
 
 # Reconfigure (le GLOB CMake doit voir les eventuels nouveaux .c de app/)
 sudo -u "$U" cmake -S app -B build
+progress 40
 # Rebuild incremental (LVGL deja compile, seuls les fichiers modifies recompilent)
 sudo -u "$U" cmake --build build --target meshui -j2
+progress 85
 
 # Reinstalle les artefacts deploy/ s'ils ont change
 install -m 755 deploy/meshui-ctl                /usr/local/sbin/meshui-ctl
@@ -29,6 +40,7 @@ install -m 755 deploy/usb-hid-setup.sh          /usr/local/sbin/meshui-usb-hid
 install -m 755 deploy/usb-storage-setup.sh      /usr/local/sbin/meshui-usb-storage
 install -m 755 deploy/backlight-init.sh         /usr/local/sbin/meshui-backlight-init
 install -m 755 deploy/meshui-update.sh          /usr/local/sbin/meshui-update 2>/dev/null || true
+progress 99
 
 systemctl restart meshui
 echo "=== update done ==="

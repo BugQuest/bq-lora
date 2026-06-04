@@ -485,6 +485,9 @@ static lv_obj_t *hap_lbl_state, *hap_lbl_btn;     /* app HOTSPOT */
 static lv_obj_t *bap_lbl_state, *bap_lbl_btn;     /* app BAD USB */
 static lv_obj_t *bap_btn_ncm, *bap_btn_hid, *bap_btn_storage; /* selecteur 3 modes */
 static lv_obj_t *upd_lbl_state, *upd_lbl_hash, *upd_btn_install; /* MISES A JOUR */
+static lv_obj_t  *upd_ov, *upd_bar, *upd_pct;     /* overlay barre de chargement maj */
+static lv_timer_t *upd_timer;
+static float       upd_disp;                       /* % affiché (lissé) */
 static lv_obj_t *sys_btn_usb_share, *sys_btn_usb_client;          /* USB > INTERNET */
 static lv_obj_t *sys_log_ta;
 static lv_obj_t *sys_bl_slider, *sys_bl_lbl;
@@ -593,12 +596,73 @@ static void upd_check_cb(lv_event_t *e) {
     }
     sys_update_check_async(upd_check_done_cb, NULL);
 }
-static void upd_apply_done_cb(bool ok, void *u) { (void)ok; (void)u; }
-static void upd_apply_yes(void) {
-    if (upd_lbl_state) {
-        lv_label_set_text(upd_lbl_state, "installation...");
-        lv_obj_set_style_text_color(upd_lbl_state, lv_color_hex(CY_MAGENTA), 0);
+/* Ferme l'overlay de progression et arrête le timer associé. */
+static void upd_overlay_close(void) {
+    if (upd_timer) { lv_timer_delete(upd_timer); upd_timer = NULL; }
+    if (upd_ov)    { lv_obj_delete(upd_ov); upd_ov = NULL; }
+    upd_bar = upd_pct = NULL;
+}
+
+/* En cas de succès, meshui redémarre et tue ce process avant ce callback.
+ * On n'arrive ici qu'en cas d'échec (pas d'internet, build cassé, ...). */
+static void upd_apply_done_cb(bool ok, void *u) {
+    (void)u;
+    if (!upd_ov) return;          /* déjà traité par upd_tick (jalon -1) */
+    upd_overlay_close();
+    if (!ok)
+        confirm_dialog("Echec de la mise a jour.\nVerifiez la connexion internet\n(voir /var/log/meshui-update.log).", NULL);
+}
+
+/* Polled ~5x/s : lit le jalon réel et anime la barre en douceur. */
+static void upd_tick(lv_timer_t *t) {
+    (void)t;
+    if (!upd_bar) return;
+    int p = sys_update_progress();
+    if (p < 0) {                 /* le script a signalé un échec */
+        upd_overlay_close();
+        confirm_dialog("Echec de la mise a jour.\nVerifiez la connexion internet\n(voir /var/log/meshui-update.log).", NULL);
+        return;
     }
+    /* rattrape vite le jalon, sinon avance lentement pour rester vivant */
+    if ((float)p > upd_disp) upd_disp += (p - upd_disp) * 0.3f + 0.4f;
+    else if (upd_disp < 99.0f) upd_disp += 0.2f;
+    if (upd_disp > 99.0f) upd_disp = 99.0f;
+    int v = (int)(upd_disp + 0.5f);
+    lv_bar_set_value(upd_bar, v, LV_ANIM_OFF);
+    if (upd_pct) lv_label_set_text_fmt(upd_pct, "%d%%", v);
+}
+
+static void upd_apply_yes(void) {
+    /* overlay plein écran avec barre de chargement */
+    upd_disp = 0;
+    upd_ov = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(upd_ov, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(upd_ov, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_bg_opa(upd_ov, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(upd_ov, 0, 0);
+    lv_obj_set_style_radius(upd_ov, 0, 0);
+    lv_obj_clear_flag(upd_ov, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(upd_ov, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(upd_ov, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(upd_ov, 14, 0);
+
+    label(upd_ov, LV_SYMBOL_DOWNLOAD "  MISE A JOUR", FONT_BIG, CY_MAGENTA);
+    label(upd_ov, "installation en cours...", FONT_BODY, CY_DIM);
+
+    upd_bar = lv_bar_create(upd_ov);
+    lv_obj_set_size(upd_bar, LV_PCT(80), 16);
+    lv_obj_set_style_radius(upd_bar, 2, 0);
+    lv_obj_set_style_bg_color(upd_bar, lv_color_hex(CY_PANEL2), LV_PART_MAIN);
+    lv_obj_set_style_border_color(upd_bar, lv_color_hex(CY_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_border_width(upd_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(upd_bar, lv_color_hex(CY_MAGENTA), LV_PART_INDICATOR);
+    lv_bar_set_range(upd_bar, 0, 100);
+    lv_bar_set_value(upd_bar, 0, LV_ANIM_OFF);
+
+    upd_pct = label(upd_ov, "0%", FONT_BODY, CY_TEXT);
+    label(upd_ov, "le Pi va redemarrer a la fin", FONT_SMALL, CY_DIM);
+
+    upd_timer = lv_timer_create(upd_tick, 200, NULL);
     sys_update_apply_async(upd_apply_done_cb, NULL);
 }
 static void upd_apply_cb(lv_event_t *e) {

@@ -82,6 +82,10 @@ void sys_update_check_async(update_check_cb_t cb, void *user);
 typedef void (*update_apply_cb_t)(bool ok, void *user);
 void sys_update_apply_async(update_apply_cb_t cb, void *user);
 
+/* Progression de la mise à jour en cours : 0..100, -1 si échec, 0 si pas démarrée.
+ * Lu en boucle par l'UI pour animer la barre de chargement. */
+int sys_update_progress(void);
+
 /* WiFi : scan + connexion asynchrones. Les callbacks sont rappelés sur le thread UI. */
 typedef struct {
     char ssid[64];

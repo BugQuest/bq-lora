@@ -355,11 +355,28 @@ static void *upd_apply_thread(void *a)
     lv_async_call(upd_apply_deliver, c);
     return NULL;
 }
+#define UPD_PROGRESS_FILE "/tmp/meshui-update.progress"
+
 void sys_update_apply_async(update_apply_cb_t cb, void *user)
 {
+    remove(UPD_PROGRESS_FILE);   /* repart de zero (evite de lire un ancien jalon) */
     upd_apply_ctx_t *c = calloc(1, sizeof(*c));
     c->cb = cb; c->user = user;
     pthread_t t; pthread_create(&t, NULL, upd_apply_thread, c); pthread_detach(t);
+}
+
+/* Jalon de progression ecrit par meshui-update.sh : 0..100, ou -1 si echec,
+ * ou 0 si le fichier n'existe pas encore. */
+int sys_update_progress(void)
+{
+    FILE *f = fopen(UPD_PROGRESS_FILE, "r");
+    if (!f) return 0;
+    int v = 0;
+    if (fscanf(f, "%d", &v) != 1) v = 0;
+    fclose(f);
+    if (v < -1) v = -1;
+    if (v > 100) v = 100;
+    return v;
 }
 
 void sys_log_tail(char *out, int cap, int n_lines)
