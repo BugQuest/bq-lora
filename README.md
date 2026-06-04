@@ -1,16 +1,39 @@
 # meshtastic-screen
 
-Écran de commande tactile pour un futur nœud **Meshtastic LoRa**, basé sur un
-**Raspberry Pi Zero 2 W** et un écran **MKS TS35-R V2.0** (3.5" 480×320).
+**BugQuest // LORA** — nœud **Meshtastic LoRa** autonome à écran tactile, bâti
+sur un **Raspberry Pi Zero 2 W** et un écran **MKS TS35-R V2.0** (3.5" 480×320).
 
-L'interface est développée en **C avec LVGL** et rendue directement sur le
-framebuffer (`/dev/fb0`), sans serveur graphique (OS en version *Lite*).
+L'appareil est un nœud Meshtastic complet (radio **SX1262** 868 MHz pilotée par
+`meshtasticd`) doublé d'une interface de commande **C / LVGL** rendue directement
+sur le framebuffer (`/dev/fb0`), sans serveur graphique (OS *Lite*). Tout se pilote
+au doigt sur l'écran, sans CLI ni application tierce.
 
-> État actuel : base matérielle (affichage + rétroéclairage + tactile) validée.
-> Radio LoRa **opérationnelle** : SX1262 détecté par `meshtasticd`, nœud Meshtastic
-> EU_868 actif (cf. [Radio LoRa](#radio-lora-sx1262)). L'UI LVGL est **branchée sur
-> l'API du nœud** (`127.0.0.1:4403`) via un client protobuf natif en C : nœuds,
-> canaux et messages réels, envoi/réception de texte et ACK.
+### Fonctionnalités
+
+- **Messagerie mesh** — canaux public + chiffrés (PSK AES256), envoi/réception de
+  texte avec ACK, badge de messages non lus, clavier virtuel.
+- **Nœuds** — liste temps réel des nœuds vus (nom, SNR/RSSI, batterie, sauts,
+  dernier contact).
+- **Gestion des canaux** — créer / renommer / supprimer / partager (QR + URL
+  `meshtastic.org/e/#…`) / importer, intégralement depuis l'écran.
+- **Réseau** — client WiFi (scan + connexion), hotspot WiFi (avec QR d'appairage),
+  accès SSH filaire par **gadget USB CDC NCM** (compatible Windows 11).
+- **Bluetooth** — scan/appairage BLE et **console série** (SPP/RFCOMM) pour piloter
+  le Pi depuis un terminal Bluetooth (cf. [docs/bluetooth.md](docs/bluetooth.md)).
+- **Bad USB** — bascule du gadget en clavier **HID** (exécution de scripts type
+  *DuckyScript*) ou en **stockage de masse** (dépôt de scripts depuis le PC), avec
+  explorateur de fichiers intégré.
+- **Système** — infos (CPU/RAM/disque/temp/alim/IP), alimentation, SSH, écran
+  (luminosité PWM, calibration tactile 5 points), logs `journalctl`.
+- **Réglages** — nom du nœud, SSID/passphrase du hotspot, fuseau horaire,
+  activation du mesh — sans recompiler.
+- **Mise à jour OTA** — `git pull` + rebuild + redémarrage depuis l'UI, avec barre
+  de progression.
+
+> **État : opérationnel.** Matériel (écran + rétroéclairage + tactile + radio)
+> validé, radio LoRa EU_868 active @ 869.525 MHz, UI branchée sur l'API du nœud
+> (`127.0.0.1:4403`) via un client protobuf natif en C. L'appareil démarre en
+> *appliance* (services systemd, splash de boot/arrêt, console détachée).
 
 ---
 
@@ -68,13 +91,23 @@ listent chaque signal avec sa GPIO logique et son rôle.
 > point ». Sur fils dupont, ces contacts lâchent facilement à la manipulation :
 > les fiabiliser (soudure / nappe / colle chaude) évite les rechutes.
 
-### Accès SSH par USB (gadget ethernet)
+### Accès SSH par USB (gadget réseau)
 
-En plus du WiFi, le Pi est configuré en **gadget USB ethernet** (`dwc2` +
-`g_ether`) : relier le **port USB *data*** du Pi (micro-USB du milieu, marqué
-`USB`, pas `PWR IN`) à un port USB du PC donne un accès `ssh bqlora` filaire,
-indépendant du WiFi. Alimenter le Pi par le port `PWR IN` en parallèle pour
-éviter tout manque de courant.
+En plus du WiFi, le Pi expose un **gadget USB réseau CDC NCM** (`dwc2` + configfs,
+descripteurs MS OS → reconnu nativement par **Windows 11**) : relier le **port USB
+*data*** du Pi (micro-USB du milieu, marqué `USB`, pas `PWR IN`) à un port USB du PC
+crée une interface `usb0` côté Pi en **10.42.1.1/24** (mode `shared` : le Pi sert le
+DHCP + NAT). Le PC obtient un bail automatiquement et `ssh bq-lora@10.42.1.1`
+fonctionne dès le boot, indépendamment du WiFi.
+
+`usb0` est forcé actif au démarrage (`usb-net-up.service` + dispatcher NM
+`90-meshui-usb0` + `ignore-carrier`) pour éviter le *deadlock* de carrier qui
+laisserait Windows voir « câble réseau débranché ». Le sous-réseau 10.42.1.0/24 est
+distinct de celui du hotspot WiFi (10.42.0.0/24) pour permettre la coexistence des
+deux. Alimenter le Pi par le port `PWR IN` en parallèle évite tout manque de courant.
+
+> Le gadget peut aussi être basculé en **clavier HID** ou **stockage de masse**
+> depuis l'écran (menu BAD USB), au prix de la perte temporaire du lien réseau USB.
 
 ---
 
@@ -204,7 +237,8 @@ de référence (validée sur Pi Zero 2 W, RPi OS trixie arm64) :
    ```
    Vérifier : la fréquence passe à **869.525 MHz** (LongFast, EU_868).
 
-5. L'API TCP `127.0.0.1:4403` est alors disponible pour l'UI (cf. roadmap).
+5. L'API TCP `127.0.0.1:4403` est alors consommée par l'UI (client protobuf natif
+   `app/mesh.c`), qui affiche nœuds, canaux et messages réels.
 
 ---
 
@@ -254,41 +288,56 @@ sudo ./build/meshui
 meshtastic-screen/
 ├── README.md
 ├── .gitignore
-├── app/                      # appli LVGL en C (compilée en ~/meshui/build/meshui)
-│   ├── CMakeLists.txt        # GLOB sur *.c
-│   ├── main.c                # tick + display fbdev + touch + ui_init
-│   ├── ui.c / ui.h           # toute l'UI : topbar, chat, nodes, sys, modales
-│   ├── theme.h               # palette cyberpunk + polices
-│   ├── mesh.c / mesh.h       # backend Meshtastic : client API TCP 4403 (protobuf natif)
-│   ├── pb.c / pb.h           # codec protobuf minimal (wire format, sans nanopb)
-│   ├── sys.c / sys.h         # infos système + actions privilégiées + WiFi async
-│   ├── touch.c / touch.h     # pilote tactile maison (evdev + affine + lissage)
-│   └── calib.c / calib.h     # calibrage 5 points moindres carrés
+├── app/                       # appli LVGL en C (compilée en ~/meshui/build/meshui)
+│   ├── CMakeLists.txt         # GLOB sur *.c
+│   ├── main.c                 # tick + display fbdev + touch + ui_init
+│   ├── ui.c / ui.h            # toute l'UI : hub, chat, nodes, sys, badusb, bt, modales
+│   ├── theme.h                # palette cyberpunk + polices
+│   ├── mesh.c / mesh.h        # backend Meshtastic : client API TCP 4403 (protobuf natif)
+│   ├── pb.c / pb.h            # codec protobuf minimal (wire format, sans nanopb)
+│   ├── sys.c / sys.h          # infos système, actions privilégiées, WiFi/BT/USB/OTA async
+│   ├── settings.c / .h        # réglages persistants (nom nœud, hotspot, fuseau, mesh)
+│   ├── touch.c / touch.h      # pilote tactile maison (evdev + affine + lissage)
+│   └── calib.c / calib.h      # calibrage 5 points moindres carrés
 ├── config/
-│   ├── config.txt.append     # overlays fbtft + ads7846 + pwm + dwc2 + spi1 (LoRa)
-│   └── lora.yaml             # config meshtasticd SX1262 (-> /etc/meshtasticd/config.d/)
-├── deploy/                   # à installer sur le Pi
-│   ├── provision.sh          # premier-boot : build + services + sudoers
-│   ├── meshui.service        # autostart de l'app
-│   ├── meshui-splash.service # boot splash + détache la console
-│   ├── meshui-ctl            # helper privilégié (NOPASSWD limité)
-│   ├── meshui-sudoers        # règle sudoers correspondante
-│   ├── backlight-init.sh     # PWM GPIO18 init
-│   ├── backlight.service     # systemd oneshot pour le PWM
-│   ├── usb-ncm-setup.sh      # gadget USB CDC NCM (Win11 OK)
-│   └── usb-gadget.service    # systemd pour le gadget USB
-├── tools/                    # utilitaires Python (pas dans le binaire C)
-│   ├── splash.py             # boot splash PIL → fb0
-│   ├── grab.py               # capture fb0 → PNG (dev)
-│   ├── touchcal.py           # relevé tactile brut (dev)
-│   └── beep.py               # tonalité piezo GPIO17 via gpiozero
+│   ├── config.txt.append      # overlays fbtft + ads7846 + pwm + dwc2 + spi1 (LoRa)
+│   └── lora.yaml              # config meshtasticd SX1262 (-> /etc/meshtasticd/config.d/)
+├── deploy/                    # à installer sur le Pi
+│   ├── provision.sh           # premier-boot : build + services + radio + sudoers
+│   ├── meshui-update.sh       # mise à jour OTA : git reset + rebuild + réinstall + restart
+│   ├── optimize-boot.sh       # optimisations du temps de boot (désactive cloud-init)
+│   ├── meshui.service         # autostart de l'app
+│   ├── meshui-splash.service  # boot splash + détache la console
+│   ├── meshui-shutdown.service# splash d'arrêt/redémarrage
+│   ├── shutdown-splash.sh      # rendu du splash d'arrêt (après libération de fb0)
+│   ├── meshui-btserial.service# console série Bluetooth (SPP/RFCOMM)
+│   ├── bluetooth-compat.conf  # bluetoothd --compat (requis pour sdptool/SPP)
+│   ├── meshui-ctl             # helper privilégié (NOPASSWD limité)
+│   ├── meshui-sudoers         # règle sudoers correspondante
+│   ├── backlight-init.sh      # PWM GPIO18 init
+│   ├── backlight.service      # systemd oneshot pour le PWM
+│   ├── usb-gadget.service     # systemd pour le gadget USB (au boot)
+│   ├── usb-ncm-setup.sh       # gadget USB CDC NCM — réseau (Win11 OK)
+│   ├── usb-hid-setup.sh       # gadget USB HID — clavier (BadUSB)
+│   ├── usb-storage-setup.sh   # gadget USB mass storage — dépôt de scripts
+│   ├── usb-net-up.service     # force l'activation de usb0 après NetworkManager
+│   ├── usb-net-up.sh          # script associé (retries nmcli connection up usb0)
+│   ├── usb0-keepup.sh         # dispatcher NM : ré-active usb0 s'il tombe
+│   └── usb0-ignore-carrier.conf# NM : monte usb0 sans attendre de carrier
+├── tools/                     # utilitaires Python (pas dans le binaire C)
+│   ├── splash.py              # boot splash PIL → fb0
+│   ├── badusb.py              # interpréteur DuckyScript → frappes HID
+│   ├── grab.py                # capture fb0 → PNG (dev)
+│   ├── touchcal.py            # relevé tactile brut (dev)
+│   └── beep.py                # tonalité piezo GPIO17 via gpiozero
 └── docs/
-    └── lv_conf.md            # modifs lv_conf.h (gérées par provision.sh)
+    ├── lv_conf.md             # modifs lv_conf.h (gérées par provision.sh)
+    └── bluetooth.md           # utilisation de la console série Bluetooth
 ```
 
 ---
 
-## Feuille de route
+## État des fonctionnalités
 
 ### Matériel & système
 
@@ -297,28 +346,39 @@ meshtastic-screen/
 - [x] Tactile XPT2046 (`ads7846`) — pilote maison evdev + lissage doigt
 - [x] Calibrage tactile 5 points (affine moindres carrés, persistant)
 - [x] Beeper GPIO17 piloté via `gpiozero`
-- [x] Gadget USB **CDC NCM** (configfs + MS OS descriptors, **Windows 11 compatible**)
-- [x] Hotspot WiFi (NetworkManager `shared`)
-- [x] Démarrage automatique appliance (services systemd, console détachée)
+- [x] Gadget USB multi-mode (configfs) : **CDC NCM** (réseau, Win11 OK), **HID**
+      (clavier BadUSB), **mass storage** (dépôt de scripts) — commutable depuis l'UI
+- [x] `usb0` forcé actif au boot (anti-deadlock carrier) → SSH USB fiable au reboot
+- [x] Bluetooth : scan/appairage BLE + console série SPP/RFCOMM (`bluetoothd --compat`)
+- [x] Hotspot WiFi (NetworkManager `shared`) + client WiFi (scan/connexion)
+- [x] Mise à jour OTA depuis l'UI (`git` + rebuild + restart, barre de progression)
+- [x] Démarrage automatique appliance (services systemd, splash boot/arrêt, console détachée)
 
 ### Interface (cyberpunk minimaliste)
 
 - [x] Identité **BugQuest // LORA** (boot splash PIL + splash app LVGL animé)
-- [x] Topbar : nom du nœud + horloge
-- [x] **Barre d'état verticale** (bord gauche) : icônes système + indicateurs LoRa (voir légende ci-dessous)
-- [x] Onglet **CHAT** : canaux public + chiffrés, fil de messages avec ACK, clavier virtuel
-  - bouton **⚙ gestion des canaux** (bout de la rangée de canaux) → modal complet (voir ci-dessous)
-- [x] Onglet **NODES** : liste des nœuds **réels** (nom, SNR/RSSI, batterie, sauts, dernier contact)
-- [x] Onglet **SYS** :
+- [x] Topbar : nom du nœud + horloge ; **barre d'état verticale** (icônes système +
+      indicateurs LoRa, voir légende ci-dessous)
+- [x] **Hub d'accueil** : grille de cartes (MESSAGES, NODES, WIFI, BLUETOOTH, HOTSPOT,
+      BAD USB, SYSTÈME, À PROPOS) avec badge de messages non lus
+- [x] **MESSAGES** : canaux public + chiffrés, fil de messages avec ACK, clavier virtuel,
+      bouton **⚙ gestion des canaux** → modal complet (voir ci-dessous)
+- [x] **NODES** : liste des nœuds **réels** (nom, SNR/RSSI, batterie, sauts, dernier contact)
+- [x] **WIFI** : SSID/signal + modal scan + connexion avec saisie passphrase
+- [x] **BLUETOOTH** : scan/appairage des périphériques + bascule de la console série
+- [x] **HOTSPOT** : état + toggle + QR code WiFi pour scan téléphone
+- [x] **BAD USB** : explorateur de scripts, bascule HID/STORAGE, exécution *DuckyScript*
+- [x] **SYSTÈME** :
   - INFO (hostname, IPs wlan/usb, uptime, CPU temp, RAM, disque, alim, kernel)
   - ALIMENTATION (Éteindre / Redémarrer avec confirmation)
   - SSH (état + ACTIVER/DESACTIVER)
-  - WIFI (SSID/signal + modal scan + connexion avec saisie passphrase)
-  - HOTSPOT (état + toggle + QR code WiFi pour scan téléphone)
-  - USB (état réel + IP côté Pi)
+  - USB (mode + état réel + IP côté Pi)
   - ECRAN (slider luminosité PWM, BIP test, CALIBRER)
+  - RÉGLAGES (nom du nœud, SSID/passphrase hotspot, fuseau, mesh on/off)
+  - MISE À JOUR (vérifier + installer l'OTA)
   - APPLICATION (RELANCER MESHUI)
   - LOG SYSTÈME (`journalctl -n 30` scrollable + rafraîchir)
+- [x] **À PROPOS** : matériel, logiciel, projet/auteur
 - [x] Modal de calibration tactile (croix rouges, 5 points)
 
 #### Barre d'état verticale (légende des icônes)
@@ -339,7 +399,7 @@ Les valeurs LoRa proviennent de `mesh_self()` (région, preset, batterie, utilis
 
 #### Gestion des canaux (modal ⚙)
 
-Accessible depuis l'onglet **CHAT** via le bouton ⚙ en bout de la rangée de canaux. Le
+Accessible depuis le menu **MESSAGES** via le bouton ⚙ en bout de la rangée de canaux. Le
 modal liste tous les canaux (icône cadenas + couleur magenta si chiffré, étiquette de
 rôle **PRIMAIRE** / **SECONDAIRE**) et offre une gestion complète, **sans CLI ni appli
 tierce** :
@@ -360,18 +420,7 @@ met à jour le modal automatiquement (pas besoin de le rouvrir). L'URL de partag
 un `ChannelSet` protobuf (paramètres du canal + preset/région LoRa) en base64 *url-safe*,
 identique au format de l'application Meshtastic officielle.
 
-### Sécurité
-
-- [x] SSH par clé publique uniquement
-- [x] Helper privilégié `meshui-ctl` + sudoers NOPASSWD strictement limité à ce binaire
-
-### Déploiement
-
-- [x] Workflow flash : Imager pour l'OS + cloud-init `user-data` complété + bundle tarball
-- [x] `provision.sh` idempotent (apt + LVGL clone + lv_conf généré + build + services)
-- [x] 3 voies d'accès SSH : WiFi Freebox, hotspot 10.42.0.1, gadget USB 10.42.1.1 (sous-réseaux distincts → coexistence hotspot + USB)
-
-### À faire — Intégration Meshtastic (radio SX1262)
+### Intégration Meshtastic (radio SX1262)
 
 - [x] Choix d'archi : `meshtasticd` natif + API TCP locale 4403 (cf. [Radio LoRa](#radio-lora-sx1262))
 - [x] Câblage radio (SPI1 dédié) + overlay `config.txt` + `config/lora.yaml`
@@ -381,15 +430,25 @@ identique au format de l'application Meshtastic officielle.
 - [x] Données réelles (nœuds, canaux, messages) à la place du backend factice
 - [x] Envoi/réception réels de texte sur LongFast + canaux PSK chiffrés
 - [x] Gestion ACK (paquets ROUTING) et reconnexion automatique
+- [x] État `mesh_self()` (région/preset/utilisation canal/batterie/nœuds) dans la barre d'état
+
+### Sécurité
+
+- [x] SSH par clé publique uniquement
+- [x] Helper privilégié `meshui-ctl` + sudoers NOPASSWD strictement limité à ce binaire
+
+### Déploiement
+
+- [x] Workflow flash : Imager pour l'OS + cloud-init `user-data` + bundle tarball
+- [x] `provision.sh` idempotent (apt + LVGL clone + lv_conf généré + build + services + radio)
+- [x] Mise à jour OTA via `meshui-update.sh` (déclenchable depuis l'UI)
+- [x] 3 voies d'accès SSH : WiFi Freebox, hotspot 10.42.0.1, gadget USB 10.42.1.1 (sous-réseaux distincts → coexistence hotspot + USB)
+
+### Pistes d'évolution
+
 - [ ] Position GPS des nœuds → vue carte hors-ligne (tuiles préchargées)
-- [ ] Exposer l'état `mesh_self()` (région/preset/util/uptime) dans l'UI
-
-### À faire — polish & extensions
-
 - [ ] Mode économie (extinction écran après inactivité, réveil au toucher)
-- [ ] Page **Réglages** (node name, SSID/passphrase hotspot, fuseau) sans rebuild
 - [ ] Carnet de contacts / nœuds favoris (alias, notes)
-- [ ] Réglages radio (région, preset, hop limit) — préparation Meshtastic
+- [ ] Réglages radio dans l'UI (région, preset, hop limit)
 - [ ] Variantes de thèmes (palettes cyberpunk alternatives)
 - [ ] Graphes CPU/RAM/temp en temps réel (sparkline)
-- [ ] Scanner Bluetooth (puce BT du Zero 2 W inutilisée)
