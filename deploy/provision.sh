@@ -100,6 +100,42 @@ nmcli connection show usb0 >/dev/null 2>&1 || \
         ipv4.method shared ipv6.method ignore autoconnect yes
 nmcli connection up usb0 2>/dev/null || true
 
+# === Radio LoRa SX1262 (Waveshare Core1262-868M) : noeud Meshtastic natif ===
+# La radio est sur un bus SPI1 dedie (SPI0 etant pris par l'ecran + tactile).
+if ! grep -q "spi1-1cs,cs0_pin=26" /boot/firmware/config.txt; then
+    cat >> /boot/firmware/config.txt <<'EOF'
+
+# === Radio LoRa SX1262 (Waveshare Core1262-868M) sur bus SPI1 dedie ===
+# CE materiel relogé sur GPIO26 (non cable) pour ne pas toucher GPIO18=backlight ni GPIO16=CS
+dtoverlay=spi1-1cs,cs0_pin=26
+EOF
+fi
+
+# Depot meshtasticd (OBS) : pas de canal stable pour trixie -> on prend beta/Debian_13
+apt-get install -y gnupg curl ca-certificates
+MESHTASTIC_DIST=Debian_13
+if [ ! -f "/etc/apt/sources.list.d/network:Meshtastic:beta.list" ]; then
+    curl -fsSL "https://download.opensuse.org/repositories/network:Meshtastic:beta/${MESHTASTIC_DIST}/Release.key" \
+        | gpg --dearmor | tee /etc/apt/trusted.gpg.d/network_Meshtastic_beta.gpg >/dev/null
+    echo "deb http://download.opensuse.org/repositories/network:/Meshtastic:/beta/${MESHTASTIC_DIST}/ /" \
+        > "/etc/apt/sources.list.d/network:Meshtastic:beta.list"
+    apt-get update -y || true
+fi
+apt-get install -y meshtasticd
+
+# Config radio (pinout SPI1 + TCXO DIO3 + RF switch RXEN/TXEN)
+install -m 644 "$SRC/config/lora.yaml" /etc/meshtasticd/config.d/lora.yaml
+systemctl enable meshtasticd
+systemctl restart meshtasticd || true
+
+# CLI meshtastic (pipx) pour piloter le noeud via l'API TCP locale 127.0.0.1:4403
+apt-get install -y pipx
+sudo -u "$U" pipx install meshtastic || true
+
+# Region EU_868 (best-effort : le demon doit etre up ; rejouable sans effet de bord)
+sleep 8
+sudo -u "$U" "$H/.local/bin/meshtastic" --host 127.0.0.1 --set lora.region EU_868 || true
+
 # Services systemd
 install -m 644 "$SRC/deploy/meshui.service" /etc/systemd/system/meshui.service
 install -m 644 "$SRC/deploy/meshui-splash.service" /etc/systemd/system/meshui-splash.service

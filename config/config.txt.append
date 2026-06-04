@@ -15,3 +15,12 @@ dtoverlay=pwm,pin=18,func=2
 
 # Tactile résistif XPT2046 -> driver ads7846 ; CS=CE1 (GPIO7), IRQ=GPIO5
 dtoverlay=ads7846,cs=1,penirq=5,penirq_pull=2,speed=2000000,xohms=150,swapxy=1
+
+# === Radio LoRa SX1262 (Waveshare Core1262-868M) sur bus SPI1 dédié ===
+# SPI0 est entièrement occupé par l'écran (CE0) et le tactile (CE1), on place
+# donc la radio sur le SPI1 auxiliaire (lignes data GPIO19/20/21).
+# Le CE matériel de spidev1.0 est relogé sur GPIO26 (NON câblé) pour ne pas
+# entrer en conflit avec GPIO18 (backlight PWM) ni avec GPIO16 (NSS de la radio,
+# piloté en GPIO par meshtasticd). meshtasticd n'utilise PAS le CE matériel :
+# il toggle CS/IRQ/Busy/Reset en libgpiod (cf. config/lora.yaml).
+dtoverlay=spi1-1cs,cs0_pin=26

@@ -1,0 +1,45 @@
+# Configuration LoRa pour meshtasticd (Meshtastic natif Linux / portduino).
+#
+# À déposer sur le Pi dans /etc/meshtasticd/config.d/lora.yaml
+# (meshtasticd charge tous les *.yaml présents dans config.d/).
+#
+# Radio : Waveshare Core1262-868M (puce SX1262 nue, 868 MHz, TCXO interne).
+# Bus    : SPI1 auxiliaire dédié (voir config/config.txt.append).
+#
+# Rappel : dans meshtasticd, CS/IRQ/Busy/Reset/RXen/TXen sont des numéros GPIO
+# (BCM) pilotés en libgpiod — indépendants du chip-select matériel du spidev.
+# Le spidev (spidev1.0) ne fournit que CLK/MOSI/MISO.
+#
+# Commutateur RF : ce module sort RXEN, TXEN et DIO2 séparément (non pontés).
+# On pilote donc RXEN et TXEN depuis le Pi (comme l'E22-900M30S) et on laisse
+# DIO2 non câblé -> PAS de DIO2_AS_RF_SWITCH.
+#
+# Câblage (Core1262 -> Pi Zero 2 W) — /!\ alim 3.3V UNIQUEMENT (jamais 5V) :
+#   3V3   -> 3V3   (pin 17)
+#   GND   -> GND   (pin 39)        (le module a plusieurs GND, un seul suffit)
+#   CLK   -> GPIO21 (pin 40)  via spidev1.0
+#   MOSI  -> GPIO20 (pin 38)  via spidev1.0
+#   MISO  -> GPIO19 (pin 35)  via spidev1.0
+#   CS    -> GPIO16 (pin 36)  CS
+#   DIO1  -> GPIO13 (pin 33)  IRQ
+#   BUSY  -> GPIO12 (pin 32)  Busy
+#   RESET -> GPIO6  (pin 31)  Reset
+#   RXEN  -> GPIO22 (pin 15)  RXen
+#   TXEN  -> GPIO23 (pin 16)  TXen
+#   DIO2  -> non câblé
+#   ANT   -> antenne 868 MHz  (NE JAMAIS émettre sans antenne : risque PA)
+
+Lora:
+  Module: sx1262
+  CS: 16
+  IRQ: 13
+  Busy: 12
+  Reset: 6
+  RXen: 22
+  TXen: 23
+  spidev: spidev1.0
+  DIO3_TCXO_VOLTAGE: true
+
+# La région (bande radio) ne se règle pas ici mais dans la config du nœud,
+# après le premier démarrage de meshtasticd :
+#   meshtastic --host 127.0.0.1 --set lora.region EU_868
