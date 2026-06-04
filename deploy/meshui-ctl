@@ -54,6 +54,8 @@ case "$1" in
         # Decouverte BLE/Classic. Sortie : MAC|NOM|RSSI|paired|connected|
         # RSSI fourni par btmgmt (live), noms/etats par bluetoothctl (cache).
         SECS="${2:-8}"
+        # Bluetooth demarre a la demande (desactive au boot pour gagner du temps)
+        systemctl start bluetooth.service 2>/dev/null || true
         /usr/sbin/rfkill unblock bluetooth 2>/dev/null || true
         /usr/bin/bluetoothctl --timeout 1 power on >/dev/null 2>&1 || true
         TMP=$(mktemp)

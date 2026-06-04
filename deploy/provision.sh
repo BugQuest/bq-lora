@@ -162,4 +162,8 @@ systemctl daemon-reload
 systemctl enable meshui-splash.service meshui.service
 systemctl start meshui-splash.service meshui.service || true
 
+# Optimisations du temps de demarrage (idempotent). DOIT rester en dernier :
+# desactive cloud-init pour les boots suivants une fois le provisioning fini.
+bash "$SRC/deploy/optimize-boot.sh" || true
+
 echo "=== provision done $(date) ==="
