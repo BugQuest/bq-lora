@@ -158,9 +158,13 @@ systemctl restart bluetooth.service || true
 # Services systemd
 install -m 644 "$SRC/deploy/meshui.service" /etc/systemd/system/meshui.service
 install -m 644 "$SRC/deploy/meshui-splash.service" /etc/systemd/system/meshui-splash.service
+# Splash d'arret/redemarrage (ExecStop dessine apres que meshui libere fb0)
+install -m 755 "$SRC/deploy/shutdown-splash.sh" /usr/local/sbin/meshui-shutdown-splash
+install -m 644 "$SRC/deploy/meshui-shutdown.service" /etc/systemd/system/meshui-shutdown.service
 systemctl daemon-reload
-systemctl enable meshui-splash.service meshui.service
+systemctl enable meshui-splash.service meshui.service meshui-shutdown.service
 systemctl start meshui-splash.service meshui.service || true
+systemctl start meshui-shutdown.service || true
 
 # Optimisations du temps de demarrage (idempotent). DOIT rester en dernier :
 # desactive cloud-init pour les boots suivants une fois le provisioning fini.

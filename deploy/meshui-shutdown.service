@@ -1,0 +1,17 @@
+[Unit]
+Description=Splash d'arret/redemarrage sur l'ecran SPI
+DefaultDependencies=no
+After=local-fs.target
+# Before=meshui.service : a l'arret, ce service est stoppe APRES meshui,
+# donc son ExecStop dessine une fois que meshui a libere /dev/fb0.
+Before=meshui.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/local/sbin/meshui-shutdown-splash
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

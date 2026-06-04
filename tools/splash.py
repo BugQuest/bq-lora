@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-# Boot splash : ecran cyberpunk "BugQuest // LORA", blit RGB565 sur /dev/fb0.
+# Splash cyberpunk "BugQuest // LORA", blit RGB565 sur /dev/fb0.
+# Sans argument : splash de boot. Avec --status/--accent : arret/redemarrage.
 from PIL import Image, ImageDraw, ImageFont
-import struct
+import struct, argparse
+
+ap = argparse.ArgumentParser()
+ap.add_argument('--status', default='[ initialisation ]')  # bandeau du bas
+ap.add_argument('--accent', default='cyan')                # cyan | magenta
+args = ap.parse_args()
 
 def rd(p):
     return open(p).read().strip()
@@ -58,7 +64,8 @@ d.line([(w/2 - 80, h/2 + 10), (w/2 + 80, h/2 + 10)], fill=BORDER, width=1)
 text_centered(d, "node // NODE-7F3A", font(13, False), h/2 + 22, DIM)
 
 # bandeau bas
-text_centered(d, "[ initialisation ]", font(13), h - 56, CY)
+STATUS = MA if args.accent == 'magenta' else CY
+text_centered(d, args.status, font(13), h - 56, STATUS)
 text_centered(d, "v0.1", font(11, False), h - 34, DIM)
 
 # Conversion RGB565 + ecriture framebuffer (respecte le stride)
