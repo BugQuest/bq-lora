@@ -108,6 +108,11 @@ nmcli connection show usb0 >/dev/null 2>&1 || \
 # enforce l'adresse (nouveaux profils ET installs existants)
 nmcli connection modify usb0 ipv4.method shared ipv4.addresses 10.42.1.1/24 ipv6.method ignore
 nmcli connection up usb0 2>/dev/null || true
+# Dispatcher NM : re-active usb0 s'il tombe (debranchement/course au boot) pour
+# que le Pi soit toujours pret a servir le DHCP/NAT au prochain branchement PC.
+install -d /etc/NetworkManager/dispatcher.d
+install -m 755 -o root -g root "$SRC/deploy/usb0-keepup.sh" \
+    /etc/NetworkManager/dispatcher.d/90-meshui-usb0
 
 # === Radio LoRa SX1262 (Waveshare Core1262-868M) : noeud Meshtastic natif ===
 # La radio est sur un bus SPI1 dedie (SPI0 etant pris par l'ecran + tactile).

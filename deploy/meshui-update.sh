@@ -42,6 +42,11 @@ install -m 755 deploy/backlight-init.sh         /usr/local/sbin/meshui-backlight
 install -m 755 deploy/meshui-update.sh          /usr/local/sbin/meshui-update 2>/dev/null || true
 install -m 755 deploy/shutdown-splash.sh        /usr/local/sbin/meshui-shutdown-splash 2>/dev/null || true
 
+# Dispatcher NM qui maintient usb0 (gadget) actif (root:root 755 obligatoire)
+install -d /etc/NetworkManager/dispatcher.d
+install -m 755 -o root -g root deploy/usb0-keepup.sh \
+    /etc/NetworkManager/dispatcher.d/90-meshui-usb0 2>/dev/null || true
+
 # Reinstalle les unites systemd + drop-ins s'ils ont change, puis recharge.
 for u in meshui.service meshui-splash.service meshui-shutdown.service \
          meshui-btserial.service backlight.service usb-gadget.service; do
