@@ -449,8 +449,14 @@ static void build_nodes(void) {
 
         lv_obj_t *nm = label(row, n->name, FONT_BODY, n->self ? CY_CYAN : CY_TEXT);
         lv_obj_align(nm, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_obj_t *id = label(row, n->id, FONT_SMALL, CY_DIM);
-        lv_obj_align(id, LV_ALIGN_TOP_RIGHT, 0, 0);
+        if (n->self) {
+            /* badge explicite : ce nœud est le nôtre */
+            lv_obj_t *me = label(row, LV_SYMBOL_HOME " VOUS", FONT_SMALL, CY_CYAN);
+            lv_obj_align(me, LV_ALIGN_TOP_RIGHT, 0, 0);
+        } else {
+            lv_obj_t *id = label(row, n->id, FONT_SMALL, CY_DIM);
+            lv_obj_align(id, LV_ALIGN_TOP_RIGHT, 0, 0);
+        }
 
         char stat[80];
         snprintf(stat, sizeof(stat), "SNR %ddB  RSSI %ddBm  " LV_SYMBOL_CHARGE "%d%%  %dhop  %s",
