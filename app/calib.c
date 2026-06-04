@@ -7,7 +7,7 @@
 #define NPT 5
 #define SCR_W 320
 #define SCR_H 480
-#define MARGIN 0
+#define MARGIN 20
 
 static const int targets[NPT][2] = {
     { MARGIN,         MARGIN         },
@@ -123,6 +123,9 @@ void calib_start(void (*done)(void))
     lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(overlay, 0, 0);
     lv_obj_set_style_radius(overlay, 0, 0);
+    /* le thème par défaut applique un padding au conteneur : il décalerait
+       toutes les croix (positionnées en absolu) vers l'intérieur. */
+    lv_obj_set_style_pad_all(overlay, 0, 0);
     lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
 
     info = lv_label_create(overlay);
