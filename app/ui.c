@@ -138,7 +138,9 @@ static void build_topbar(lv_obj_t *parent) {
 
     /* cluster d'icônes + horloge à droite */
     lv_obj_t *right = lv_obj_create(bar);
-    lv_obj_set_size(right, LV_SIZE_CONTENT, LV_PCT(100));
+    /* largeur fixe : un flex SIZE_CONTENT + FLEX_ALIGN_END rabote les premiers
+       enfants (USB/WiFi disparaissent, seule l'horloge survit) — bug de mesure LVGL */
+    lv_obj_set_size(right, 120, LV_PCT(100));
     flat(right);
     lv_obj_set_flex_flow(right, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(right, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
