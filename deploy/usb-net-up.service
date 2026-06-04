@@ -1,0 +1,15 @@
+[Unit]
+Description=Active le lien USB usb0 (gadget NCM) apres NetworkManager
+# usb-gadget.service cree l'interface (Before NM) ; ici on l'active APRES que NM
+# soit pret, car NM n'auto-active pas une interface gadget sans carrier au boot.
+After=NetworkManager.service usb-gadget.service
+Wants=NetworkManager.service
+Requires=usb-gadget.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/meshui-usb-net-up
+
+[Install]
+WantedBy=multi-user.target

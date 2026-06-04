@@ -107,12 +107,24 @@ nmcli connection show usb0 >/dev/null 2>&1 || \
         ipv4.method shared ipv6.method ignore autoconnect yes
 # enforce l'adresse (nouveaux profils ET installs existants)
 nmcli connection modify usb0 ipv4.method shared ipv4.addresses 10.42.1.1/24 ipv6.method ignore
+# ignore-carrier : usb0 est une interface serveur (shared) ; NM doit la monter
+# des le boot sans attendre de carrier, sinon deadlock -> PC voit "debranche".
+install -m 644 "$SRC/deploy/usb0-ignore-carrier.conf" \
+    /etc/NetworkManager/conf.d/10-usb0-ignore-carrier.conf
+nmcli general reload 2>/dev/null || true
 nmcli connection up usb0 2>/dev/null || true
 # Dispatcher NM : re-active usb0 s'il tombe (debranchement/course au boot) pour
 # que le Pi soit toujours pret a servir le DHCP/NAT au prochain branchement PC.
 install -d /etc/NetworkManager/dispatcher.d
 install -m 755 -o root -g root "$SRC/deploy/usb0-keepup.sh" \
     /etc/NetworkManager/dispatcher.d/90-meshui-usb0
+# Service qui force l'activation de usb0 apres NM (NM ne l'auto-active pas faute
+# de carrier au boot -> sinon le PC voit "cable debranche").
+install -m 755 "$SRC/deploy/usb-net-up.sh"   /usr/local/sbin/meshui-usb-net-up
+install -m 644 "$SRC/deploy/usb-net-up.service" /etc/systemd/system/usb-net-up.service
+systemctl daemon-reload
+systemctl enable usb-net-up.service || true
+systemctl start  usb-net-up.service || true
 
 # === Radio LoRa SX1262 (Waveshare Core1262-868M) : noeud Meshtastic natif ===
 # La radio est sur un bus SPI1 dedie (SPI0 etant pris par l'ecran + tactile).

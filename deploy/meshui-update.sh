@@ -41,15 +41,22 @@ install -m 755 deploy/usb-storage-setup.sh      /usr/local/sbin/meshui-usb-stora
 install -m 755 deploy/backlight-init.sh         /usr/local/sbin/meshui-backlight-init
 install -m 755 deploy/meshui-update.sh          /usr/local/sbin/meshui-update 2>/dev/null || true
 install -m 755 deploy/shutdown-splash.sh        /usr/local/sbin/meshui-shutdown-splash 2>/dev/null || true
+install -m 755 deploy/usb-net-up.sh             /usr/local/sbin/meshui-usb-net-up 2>/dev/null || true
 
 # Dispatcher NM qui maintient usb0 (gadget) actif (root:root 755 obligatoire)
 install -d /etc/NetworkManager/dispatcher.d
 install -m 755 -o root -g root deploy/usb0-keepup.sh \
     /etc/NetworkManager/dispatcher.d/90-meshui-usb0 2>/dev/null || true
+# ignore-carrier sur usb0 : NM le monte des le boot sans attendre de carrier
+# (sinon deadlock -> PC voit "cable debranche")
+install -m 644 deploy/usb0-ignore-carrier.conf \
+    /etc/NetworkManager/conf.d/10-usb0-ignore-carrier.conf 2>/dev/null || true
+nmcli general reload 2>/dev/null || true
 
 # Reinstalle les unites systemd + drop-ins s'ils ont change, puis recharge.
 for u in meshui.service meshui-splash.service meshui-shutdown.service \
-         meshui-btserial.service backlight.service usb-gadget.service; do
+         meshui-btserial.service backlight.service usb-gadget.service \
+         usb-net-up.service; do
     [ -f "deploy/$u" ] && install -m 644 "deploy/$u" "/etc/systemd/system/$u"
 done
 if [ -f deploy/bluetooth-compat.conf ]; then
@@ -59,6 +66,7 @@ if [ -f deploy/bluetooth-compat.conf ]; then
 fi
 systemctl daemon-reload
 systemctl enable meshui-shutdown.service 2>/dev/null || true
+systemctl enable usb-net-up.service 2>/dev/null || true
 progress 99
 
 systemctl restart meshui
