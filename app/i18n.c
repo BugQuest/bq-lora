@@ -1,0 +1,386 @@
+#include "i18n.h"
+#include "settings.h"
+#include <string.h>
+
+/* Tableaux ordonnes par str_id_t. Si on ajoute une chaine cote .h, on AJOUTE
+ * la meme entree dans LES DEUX tableaux et a la meme position. La compilation
+ * verifie le compte via le 'static_assert' a la fin. */
+
+static const char *FR[STR_COUNT] = {
+    /* tabs */
+    [STR_TAB_HOME] = "ACCUEIL", [STR_TAB_NODES] = "NODES", [STR_TAB_CHAT] = "CHAT",
+    [STR_TAB_CHANNELS] = "CANAUX", [STR_TAB_SYS] = "SYSTEME",
+    [STR_TAB_HOTSPOT] = "HOTSPOT", [STR_TAB_BADUSB] = "BAD USB",
+    [STR_TAB_ABOUT] = "A PROPOS",
+    [STR_TAB_CAMERA] = "CAMERA", [STR_TAB_GALLERY] = "GALERIE",
+
+    /* topbar */
+    [STR_MESH_ACTIVE] = "MESH actif", [STR_MESH_INACTIVE] = "MESH inactif",
+
+    /* NODES */
+    [STR_NODES_TITLE] = "NODES",
+    [STR_SORT_SNR] = " SNR", [STR_SORT_RECENT] = " RECENT",
+    [STR_SORT_BTN_SNR] = " TRI: SNR", [STR_SORT_BTN_RECENT] = " TRI: RECENT",
+    [STR_YOU_BADGE] = " VOUS",
+    [STR_FMT_NODE_META] = "SNR %d(max%s)  RSSI %d  %s%d%%  %dhop  vu %s",
+    [STR_FMT_RADIO_LINE] = " %s  %s  TX %s  %d sauts",
+    [STR_TX_AUTO] = "auto",
+    [STR_HOPS_LABEL] = "sauts",
+
+    /* CHAT */
+    [STR_CHAT_SEND] = "ENVOYER",
+    [STR_CHAT_PLACEHOLDER] = "Tape ton message...",
+    [STR_CHAT_TYPE_HERE] = "Tape ton message...",
+    [STR_MESH_OFF_HINT] = "MESH inactif.\nReactivez MESH (bouton en bas)\npour les messages et les nodes.",
+    [STR_CHANNEL_LABEL] = "Canal",
+
+    /* canaux */
+    [STR_CHANNELS_TITLE] = "Gestion des canaux",
+    [STR_CHAN_NEW_PUBLIC] = " PUBLIC", [STR_CHAN_NEW_ENC] = " CHIFFRE",
+    [STR_CHAN_IMPORT] = " IMPORTER", [STR_CHAN_CLOSE] = " FERMER",
+    [STR_CHAN_RENAME] = "RENOMMER", [STR_CHAN_SHARE] = "PARTAGER",
+    [STR_CHAN_DELETE] = "SUPPR.",
+    [STR_CHAN_DELETE_CONFIRM] = "Supprimer ce canal ?",
+    [STR_SHARE_UNAVAILABLE] = "Partage indisponible",
+    [STR_URL_INVALID] = "URL invalide",
+    [STR_NO_CHANNEL_ADDED] = "Aucun canal a ajouter",
+    [STR_IMPORT_CHAN_TITLE] = "Importer un canal",
+    [STR_CANCEL] = "ANNULER", [STR_VALIDATE] = "VALIDER", [STR_OK_BTN] = "OK",
+    [STR_CLOSE] = "FERMER", [STR_CONFIRM] = "CONFIRMER", [STR_CONNECT] = "CONNECTER",
+    [STR_DISCONNECT] = "DECONNECTER", [STR_FORGET] = "OUBLIER", [STR_PAIR] = "APPAIRER",
+    [STR_SAVE] = "ENREGISTRER", [STR_MODIFY] = "MODIFIER",
+    [STR_REFRESH] = "RAFRAICHIR", [STR_SCAN] = "SCAN", [STR_RESCAN] = "RESCAN",
+
+    /* SYSTEME */
+    [STR_SEC_INFO] = "INFO", [STR_SEC_POWER] = "ALIMENTATION", [STR_SEC_SSH] = "SSH",
+    [STR_SEC_WIFI] = "WIFI", [STR_SEC_BLUETOOTH] = "BLUETOOTH",
+    [STR_SEC_HOTSPOT] = "HOTSPOT", [STR_SEC_USB_NET] = "USB RESEAU",
+    [STR_SEC_SETTINGS] = "REGLAGES", [STR_SEC_APP] = "APPLICATION",
+    [STR_SEC_UPDATES] = "MISES A JOUR", [STR_SEC_SCREEN] = "ECRAN",
+    [STR_SEC_LOG] = "LOG SYSTEME", [STR_SEC_LANG] = "LANGUE",
+    [STR_INFO_HOSTNAME] = "hostname", [STR_INFO_IP_WLAN] = "ip wlan",
+    [STR_INFO_IP_USB] = "ip usb", [STR_INFO_UPTIME] = "uptime",
+    [STR_INFO_CPU] = "cpu", [STR_INFO_RAM] = "ram", [STR_INFO_DISK] = "disque /",
+    [STR_INFO_POWER] = "alim", [STR_INFO_KERNEL] = "noyau",
+    [STR_INFO_STATE] = "etat", [STR_INFO_IP_PI] = "ip Pi",
+    [STR_POWER_LOW] = "SOUS-TENSION", [STR_POWER_PREV] = "deja eu", [STR_POWER_OK] = "ok",
+    [STR_STATE_ACTIVE] = "actif", [STR_STATE_STOPPED] = "arrete",
+    [STR_STATE_OFF] = "coupe", [STR_STATE_INACTIVE] = "inactif",
+    [STR_STATE_CONNECTED] = "connecte", [STR_STATE_DISCONNECTED] = "deconnecte",
+    [STR_RADIO_ON] = "radio active", [STR_RADIO_OFF] = "radio coupee",
+    [STR_BTN_ENABLE] = "ACTIVER", [STR_BTN_DISABLE] = "DESACTIVER",
+    [STR_BTN_SHUTDOWN] = "  ETEINDRE", [STR_BTN_REBOOT] = "  REDEMARRER",
+    [STR_BTN_RESTART_APP] = "  RELANCER MESHUI",
+    [STR_BTN_CHECK_UPDATE] = "  VERIFIER", [STR_BTN_INSTALL_UPDATE] = "  INSTALLER",
+    [STR_BTN_BEEP] = "  BIP", [STR_BTN_CALIBRATE] = "  CALIBRER",
+    [STR_BTN_REFRESH_LOG] = "  RAFRAICHIR",
+    [STR_BTN_MODIFY] = "  MODIFIER",
+    [STR_BTN_NET_SHARE] = "PARTAGE Pi", [STR_BTN_NET_CLIENT] = "CLIENT (ICS)",
+    [STR_BTN_USB_MODE_NET] = "RESEAU", [STR_BTN_USB_MODE_KBD] = "CLAVIER",
+    [STR_BTN_USB_MODE_STORAGE] = "STOCKAGE",
+    [STR_BTN_MODE_NET] = "MODE RESEAU", [STR_BTN_MODE_KBD] = "MODE CLAVIER",
+    [STR_BTN_MODE_STORAGE] = "MODE STOCKAGE",
+    [STR_USB_NET_HINT] = "Brancher PC sur le port USB (milieu) du Pi",
+    [STR_USB_INTERNET] = "internet :",
+    [STR_SETTINGS_HINT] = "noeud, SSID hotspot, passphrase, fuseau",
+    [STR_LUMINOSITY] = "luminosite", [STR_SCREEN_TIMEOUT] = "veille ecran",
+    [STR_SCRIPTS_LABEL] = "scripts",
+    [STR_CONFIRM_REBOOT] = "Redemarrer le Pi ?",
+    [STR_CONFIRM_SHUTDOWN] = "Eteindre le Pi ?",
+    [STR_CONFIRM_RESTART_APP] = "Relancer meshui ?",
+    [STR_CONFIRM_WIFI_OFF] = "Couper le WiFi ?\n(coupe la session SSH WiFi)",
+    [STR_CONFIRM_NET_SHARE] = "Pi serveur DHCP USB ?\n(pas d'internet sur Pi)",
+    [STR_CONFIRM_NET_CLIENT] = "Recevoir internet du PC ?\n(active d'abord l'ICS Windows)",
+    [STR_CONFIRM_MODE_NET] = "Mode RESEAU ?\n(restaure SSH USB)",
+    [STR_CONFIRM_MODE_KBD] = "Mode CLAVIER ?\n(coupe SSH USB)",
+    [STR_CONFIRM_MODE_STORAGE] = "Mode STOCKAGE ?\n(expose le dossier badusb\nau PC, coupe SSH USB)",
+    [STR_CONFIRM_HOTSPOT_ON] = "Activer le hotspot ?\n(coupe le WiFi actuel)",
+    [STR_CONFIRM_HOTSPOT_OFF] = "Desactiver le hotspot ?",
+    [STR_CONFIRM_UPDATE] = "Installer la maj ?\n(meshui redemarrera)",
+    [STR_UPDATE_TITLE] = "  MISE A JOUR",
+    [STR_UPDATE_INSTALLING] = "installation en cours...",
+    [STR_UPDATE_REBOOT_HINT] = "le Pi va redemarrer a la fin",
+    [STR_UPDATE_CHECKING] = "verification...",
+    [STR_UPDATE_FAILED] = "Echec de la mise a jour.\nVerifiez la connexion internet\n(voir /var/log/meshui-update.log).",
+    [STR_CONFIRM_KBD_FIRST] = "Active d'abord le mode CLAVIER",
+    [STR_INVALID_NODE_NAME] = "Nom de noeud invalide.\n1 a 39 caracteres, sans espaces\nen debut/fin.",
+    [STR_NAME_SAVED_LOCAL] = "Nom enregistre localement.\nMESH inactif : le nom radio\nsera pousse a la reconnexion.",
+    [STR_SETTINGS_TITLE] = "Reglages",
+    [STR_SETTINGS_DETAILS] = "noeud, SSID hotspot, passphrase, fuseau",
+
+    /* WiFi */
+    [STR_WIFI_SCANNING] = "scan en cours...",
+    [STR_WIFI_CONNECTING] = "connexion...",
+    [STR_WIFI_CONNECTED] = "connecte",
+    [STR_WIFI_NO_NETWORK] = "aucun reseau",
+    [STR_WIFI_PASSPHRASE] = "passphrase",
+    [STR_WIFI_QR_TITLE] = "  SCAN QR WiFi",
+    [STR_WIFI_QR_HINT] = "Cadre un QR WiFi...",
+    [STR_WIFI_QR_NOT_WIFI] = "QR non-WiFi, continue...",
+    [STR_WIFI_QR_BTN] = "  QR",
+    [STR_WIFI_WPS_BTN] = "  WPS",
+    [STR_WPS_TITLE] = "  WPS push-button",
+    [STR_WPS_HINT] = "Appuie sur le bouton WPS du routeur...",
+    [STR_WPS_FMT_REMAINING] = "Appuie WPS sur le routeur... %ds",
+    [STR_WPS_CONNECTED] = "WPS : connecte",
+    [STR_WPS_FAILED] = "WPS : echec",
+    [STR_WPS_TIMEOUT] = "timeout WPS (120s)",
+    [STR_FMT_QR_CONNECTING] = "QR : %s -> connexion...",
+
+    /* Bluetooth */
+    [STR_BT_SCANNING] = "scan en cours (8s)...",
+    [STR_BT_PAIRING] = "appairage (peut durer ~20s)...",
+    [STR_BT_CONNECTING] = "connexion...",
+    [STR_BT_NO_DEVICE] = "aucun appareil",
+    [STR_BT_OK_RESCAN] = "ok, rescan...", [STR_BT_FAILED] = "echec",
+    [STR_BT_CONSOLE_ON] = "  CONSOLE : ON",
+    [STR_BT_CONSOLE_OFF] = "  CONSOLE : OFF",
+    [STR_BT_SERIAL_VISIBLE] = "console serie visible (appairez puis SPP)",
+    [STR_BT_SERIAL_HIDDEN] = "console serie coupee",
+
+    /* Hotspot */
+    [STR_HAP_TITLE] = "HOTSPOT",
+    [STR_HAP_QR_BTN] = "  QR CODE WIFI",
+
+    /* About */
+    [STR_ABOUT_TITLE] = "BugQuest",
+    [STR_ABOUT_VERSION] = "v0.1",
+    [STR_ABOUT_HW] = "MATERIEL", [STR_ABOUT_SW] = "LOGICIEL",
+    [STR_ABOUT_PROJECT] = "PROJET",
+
+    /* Camera / Galerie */
+    [STR_CAMERA_TITLE] = "CAMERA",
+    [STR_CAM_LIVE] = "flux live...",
+    [STR_CAM_CAPTURE] = "  CAPTURE",
+    [STR_CAM_GALLERY] = "  GALERIE",
+    [STR_CAM_HD_CAPTURE] = "  capture HD...",
+    [STR_CAM_CAPTURE_FAILED] = "  echec de capture",
+    [STR_GAL_TITLE] = "GALERIE",
+    [STR_GAL_EMPTY] = "aucune photo",
+    [STR_GAL_DELETE_CONFIRM] = "Supprimer cette photo ?",
+
+    /* BadUSB */
+    [STR_BADUSB_TITLE] = "BAD USB",
+    [STR_BADUSB_RUNNING] = "  EN COURS...  ",
+    [STR_BADUSB_DONE] = "  TERMINE  ",
+    [STR_BADUSB_FAILED] = "  ECHEC  ",
+    [STR_BADUSB_SCRIPTS] = "scripts",
+    [STR_BADUSB_RUN] = "RUN",
+
+    /* Reglages modal */
+    [STR_SET_TITLE] = "Reglages",
+
+    /* Settings champs */
+    [STR_FIELD_NODE_NAME] = "nom du noeud",
+    [STR_FIELD_HOTSPOT_SSID] = "SSID hotspot",
+    [STR_FIELD_HOTSPOT_PASS] = "passphrase hotspot",
+    [STR_FIELD_TIMEZONE] = "fuseau horaire",
+    [STR_BADUSB_DIR_EMPTY] = "(dossier vide)",
+    [STR_ROLE_PRIMARY] = "PRIMAIRE",
+    [STR_ROLE_SECONDARY] = "SECONDAIRE",
+    [STR_FMT_SHARE_HDR] = "Partager  %s",
+    [STR_PASTE_URL_HINT] = "coller l'URL meshtastic.org/e/#...",
+    [STR_FMT_EXEC] = "exec : %s",
+    [STR_BADUSB_HEADER] = "// BAD USB //",
+    [STR_USB_MODE_KBD_ACTIVE] = "CLAVIER actif",
+    [STR_USB_MODE_STORAGE_ACTIVE] = "STOCKAGE actif",
+    [STR_USB_MODE_NET_ACTIVE] = "RESEAU actif",
+
+    /* Langue */
+    [STR_LANG_FR] = "FR", [STR_LANG_EN] = "EN",
+    [STR_LANG_BTN] = "  LANGUE",
+};
+
+static const char *EN[STR_COUNT] = {
+    /* tabs */
+    [STR_TAB_HOME] = "HOME", [STR_TAB_NODES] = "NODES", [STR_TAB_CHAT] = "CHAT",
+    [STR_TAB_CHANNELS] = "CHANNELS", [STR_TAB_SYS] = "SYSTEM",
+    [STR_TAB_HOTSPOT] = "HOTSPOT", [STR_TAB_BADUSB] = "BAD USB",
+    [STR_TAB_ABOUT] = "ABOUT",
+    [STR_TAB_CAMERA] = "CAMERA", [STR_TAB_GALLERY] = "GALLERY",
+
+    /* topbar */
+    [STR_MESH_ACTIVE] = "MESH on", [STR_MESH_INACTIVE] = "MESH off",
+
+    /* NODES */
+    [STR_NODES_TITLE] = "NODES",
+    [STR_SORT_SNR] = " SNR", [STR_SORT_RECENT] = " RECENT",
+    [STR_SORT_BTN_SNR] = " SORT: SNR", [STR_SORT_BTN_RECENT] = " SORT: RECENT",
+    [STR_YOU_BADGE] = " YOU",
+    [STR_FMT_NODE_META] = "SNR %d(max%s)  RSSI %d  %s%d%%  %dhop  seen %s",
+    [STR_FMT_RADIO_LINE] = " %s  %s  TX %s  %d hops",
+    [STR_TX_AUTO] = "auto",
+    [STR_HOPS_LABEL] = "hops",
+
+    /* CHAT */
+    [STR_CHAT_SEND] = "SEND",
+    [STR_CHAT_PLACEHOLDER] = "Type your message...",
+    [STR_CHAT_TYPE_HERE] = "Type your message...",
+    [STR_MESH_OFF_HINT] = "MESH disabled.\nRe-enable MESH (button below)\nto use messages and nodes.",
+    [STR_CHANNEL_LABEL] = "Channel",
+
+    /* channels */
+    [STR_CHANNELS_TITLE] = "Channel manager",
+    [STR_CHAN_NEW_PUBLIC] = " PUBLIC", [STR_CHAN_NEW_ENC] = " ENCRYPTED",
+    [STR_CHAN_IMPORT] = " IMPORT", [STR_CHAN_CLOSE] = " CLOSE",
+    [STR_CHAN_RENAME] = "RENAME", [STR_CHAN_SHARE] = "SHARE",
+    [STR_CHAN_DELETE] = "DELETE",
+    [STR_CHAN_DELETE_CONFIRM] = "Delete this channel?",
+    [STR_SHARE_UNAVAILABLE] = "Share unavailable",
+    [STR_URL_INVALID] = "Invalid URL",
+    [STR_NO_CHANNEL_ADDED] = "No channel to add",
+    [STR_IMPORT_CHAN_TITLE] = "Import a channel",
+    [STR_CANCEL] = "CANCEL", [STR_VALIDATE] = "OK", [STR_OK_BTN] = "OK",
+    [STR_CLOSE] = "CLOSE", [STR_CONFIRM] = "CONFIRM", [STR_CONNECT] = "CONNECT",
+    [STR_DISCONNECT] = "DISCONNECT", [STR_FORGET] = "FORGET", [STR_PAIR] = "PAIR",
+    [STR_SAVE] = "SAVE", [STR_MODIFY] = "EDIT",
+    [STR_REFRESH] = "REFRESH", [STR_SCAN] = "SCAN", [STR_RESCAN] = "RESCAN",
+
+    /* SYSTEM */
+    [STR_SEC_INFO] = "INFO", [STR_SEC_POWER] = "POWER", [STR_SEC_SSH] = "SSH",
+    [STR_SEC_WIFI] = "WIFI", [STR_SEC_BLUETOOTH] = "BLUETOOTH",
+    [STR_SEC_HOTSPOT] = "HOTSPOT", [STR_SEC_USB_NET] = "USB NETWORK",
+    [STR_SEC_SETTINGS] = "SETTINGS", [STR_SEC_APP] = "APP",
+    [STR_SEC_UPDATES] = "UPDATES", [STR_SEC_SCREEN] = "SCREEN",
+    [STR_SEC_LOG] = "SYSTEM LOG", [STR_SEC_LANG] = "LANGUAGE",
+    [STR_INFO_HOSTNAME] = "hostname", [STR_INFO_IP_WLAN] = "ip wlan",
+    [STR_INFO_IP_USB] = "ip usb", [STR_INFO_UPTIME] = "uptime",
+    [STR_INFO_CPU] = "cpu", [STR_INFO_RAM] = "ram", [STR_INFO_DISK] = "disk /",
+    [STR_INFO_POWER] = "power", [STR_INFO_KERNEL] = "kernel",
+    [STR_INFO_STATE] = "state", [STR_INFO_IP_PI] = "Pi ip",
+    [STR_POWER_LOW] = "UNDER-VOLT", [STR_POWER_PREV] = "had it before", [STR_POWER_OK] = "ok",
+    [STR_STATE_ACTIVE] = "on", [STR_STATE_STOPPED] = "stopped",
+    [STR_STATE_OFF] = "off", [STR_STATE_INACTIVE] = "inactive",
+    [STR_STATE_CONNECTED] = "connected", [STR_STATE_DISCONNECTED] = "disconnected",
+    [STR_RADIO_ON] = "radio on", [STR_RADIO_OFF] = "radio off",
+    [STR_BTN_ENABLE] = "ENABLE", [STR_BTN_DISABLE] = "DISABLE",
+    [STR_BTN_SHUTDOWN] = "  SHUTDOWN", [STR_BTN_REBOOT] = "  REBOOT",
+    [STR_BTN_RESTART_APP] = "  RESTART MESHUI",
+    [STR_BTN_CHECK_UPDATE] = "  CHECK", [STR_BTN_INSTALL_UPDATE] = "  INSTALL",
+    [STR_BTN_BEEP] = "  BEEP", [STR_BTN_CALIBRATE] = "  CALIBRATE",
+    [STR_BTN_REFRESH_LOG] = "  REFRESH",
+    [STR_BTN_MODIFY] = "  EDIT",
+    [STR_BTN_NET_SHARE] = "Pi SHARES", [STR_BTN_NET_CLIENT] = "CLIENT (ICS)",
+    [STR_BTN_USB_MODE_NET] = "NETWORK", [STR_BTN_USB_MODE_KBD] = "KEYBOARD",
+    [STR_BTN_USB_MODE_STORAGE] = "STORAGE",
+    [STR_BTN_MODE_NET] = "NETWORK MODE", [STR_BTN_MODE_KBD] = "KEYBOARD MODE",
+    [STR_BTN_MODE_STORAGE] = "STORAGE MODE",
+    [STR_USB_NET_HINT] = "Plug PC into the Pi's USB port (middle)",
+    [STR_USB_INTERNET] = "internet:",
+    [STR_SETTINGS_HINT] = "node, hotspot SSID, passphrase, timezone",
+    [STR_LUMINOSITY] = "brightness", [STR_SCREEN_TIMEOUT] = "screen sleep",
+    [STR_SCRIPTS_LABEL] = "scripts",
+    [STR_CONFIRM_REBOOT] = "Reboot the Pi?",
+    [STR_CONFIRM_SHUTDOWN] = "Shut down the Pi?",
+    [STR_CONFIRM_RESTART_APP] = "Restart meshui?",
+    [STR_CONFIRM_WIFI_OFF] = "Turn WiFi off?\n(drops your WiFi SSH session)",
+    [STR_CONFIRM_NET_SHARE] = "Pi as DHCP server on USB?\n(no internet on Pi)",
+    [STR_CONFIRM_NET_CLIENT] = "Get internet from the PC?\n(enable Windows ICS first)",
+    [STR_CONFIRM_MODE_NET] = "NETWORK mode?\n(restores USB SSH)",
+    [STR_CONFIRM_MODE_KBD] = "KEYBOARD mode?\n(drops USB SSH)",
+    [STR_CONFIRM_MODE_STORAGE] = "STORAGE mode?\n(exposes the badusb folder\nto the PC, drops USB SSH)",
+    [STR_CONFIRM_HOTSPOT_ON] = "Enable hotspot?\n(disconnects current WiFi)",
+    [STR_CONFIRM_HOTSPOT_OFF] = "Disable hotspot?",
+    [STR_CONFIRM_UPDATE] = "Install update?\n(meshui will restart)",
+    [STR_UPDATE_TITLE] = "  UPDATE",
+    [STR_UPDATE_INSTALLING] = "installing...",
+    [STR_UPDATE_REBOOT_HINT] = "the Pi will reboot at the end",
+    [STR_UPDATE_CHECKING] = "checking...",
+    [STR_UPDATE_FAILED] = "Update failed.\nCheck your internet connection\n(see /var/log/meshui-update.log).",
+    [STR_CONFIRM_KBD_FIRST] = "Enable KEYBOARD mode first",
+    [STR_INVALID_NODE_NAME] = "Invalid node name.\n1 to 39 characters, no leading\nor trailing spaces.",
+    [STR_NAME_SAVED_LOCAL] = "Name saved locally.\nMESH disabled: the radio name\nwill be pushed on reconnect.",
+    [STR_SETTINGS_TITLE] = "Settings",
+    [STR_SETTINGS_DETAILS] = "node, hotspot SSID, passphrase, timezone",
+
+    /* WiFi */
+    [STR_WIFI_SCANNING] = "scanning...",
+    [STR_WIFI_CONNECTING] = "connecting...",
+    [STR_WIFI_CONNECTED] = "connected",
+    [STR_WIFI_NO_NETWORK] = "no network",
+    [STR_WIFI_PASSPHRASE] = "passphrase",
+    [STR_WIFI_QR_TITLE] = "  SCAN WiFi QR",
+    [STR_WIFI_QR_HINT] = "Frame a WiFi QR code...",
+    [STR_WIFI_QR_NOT_WIFI] = "non-WiFi QR, keep going...",
+    [STR_WIFI_QR_BTN] = "  QR",
+    [STR_WIFI_WPS_BTN] = "  WPS",
+    [STR_WPS_TITLE] = "  WPS push-button",
+    [STR_WPS_HINT] = "Press the WPS button on your router...",
+    [STR_WPS_FMT_REMAINING] = "Press WPS on router... %ds",
+    [STR_WPS_CONNECTED] = "WPS: connected",
+    [STR_WPS_FAILED] = "WPS: failed",
+    [STR_WPS_TIMEOUT] = "WPS timeout (120s)",
+    [STR_FMT_QR_CONNECTING] = "QR: %s -> connecting...",
+
+    /* Bluetooth */
+    [STR_BT_SCANNING] = "scanning (8s)...",
+    [STR_BT_PAIRING] = "pairing (may take ~20s)...",
+    [STR_BT_CONNECTING] = "connecting...",
+    [STR_BT_NO_DEVICE] = "no device",
+    [STR_BT_OK_RESCAN] = "ok, rescanning...", [STR_BT_FAILED] = "failed",
+    [STR_BT_CONSOLE_ON] = "  CONSOLE: ON",
+    [STR_BT_CONSOLE_OFF] = "  CONSOLE: OFF",
+    [STR_BT_SERIAL_VISIBLE] = "serial console visible (pair then SPP)",
+    [STR_BT_SERIAL_HIDDEN] = "serial console hidden",
+
+    /* Hotspot */
+    [STR_HAP_TITLE] = "HOTSPOT",
+    [STR_HAP_QR_BTN] = "  WIFI QR CODE",
+
+    /* About */
+    [STR_ABOUT_TITLE] = "BugQuest",
+    [STR_ABOUT_VERSION] = "v0.1",
+    [STR_ABOUT_HW] = "HARDWARE", [STR_ABOUT_SW] = "SOFTWARE",
+    [STR_ABOUT_PROJECT] = "PROJECT",
+
+    /* Camera / Gallery */
+    [STR_CAMERA_TITLE] = "CAMERA",
+    [STR_CAM_LIVE] = "live stream...",
+    [STR_CAM_CAPTURE] = "  CAPTURE",
+    [STR_CAM_GALLERY] = "  GALLERY",
+    [STR_CAM_HD_CAPTURE] = "  HD capture...",
+    [STR_CAM_CAPTURE_FAILED] = "  capture failed",
+    [STR_GAL_TITLE] = "GALLERY",
+    [STR_GAL_EMPTY] = "no photo",
+    [STR_GAL_DELETE_CONFIRM] = "Delete this photo?",
+
+    /* BadUSB */
+    [STR_BADUSB_TITLE] = "BAD USB",
+    [STR_BADUSB_RUNNING] = "  RUNNING...  ",
+    [STR_BADUSB_DONE] = "  DONE  ",
+    [STR_BADUSB_FAILED] = "  FAILED  ",
+    [STR_BADUSB_SCRIPTS] = "scripts",
+    [STR_BADUSB_RUN] = "RUN",
+
+    /* Settings modal */
+    [STR_SET_TITLE] = "Settings",
+
+    /* Settings fields */
+    [STR_FIELD_NODE_NAME] = "node name",
+    [STR_FIELD_HOTSPOT_SSID] = "hotspot SSID",
+    [STR_FIELD_HOTSPOT_PASS] = "hotspot passphrase",
+    [STR_FIELD_TIMEZONE] = "timezone",
+    [STR_BADUSB_DIR_EMPTY] = "(empty folder)",
+    [STR_ROLE_PRIMARY] = "PRIMARY",
+    [STR_ROLE_SECONDARY] = "SECONDARY",
+    [STR_FMT_SHARE_HDR] = "Share  %s",
+    [STR_PASTE_URL_HINT] = "paste the meshtastic.org/e/# URL...",
+    [STR_FMT_EXEC] = "exec: %s",
+    [STR_BADUSB_HEADER] = "// BAD USB //",
+    [STR_USB_MODE_KBD_ACTIVE] = "KEYBOARD active",
+    [STR_USB_MODE_STORAGE_ACTIVE] = "STORAGE active",
+    [STR_USB_MODE_NET_ACTIVE] = "NETWORK active",
+
+    /* Language */
+    [STR_LANG_FR] = "FR", [STR_LANG_EN] = "EN",
+    [STR_LANG_BTN] = "  LANGUAGE",
+};
+
+const char *tr(str_id_t id)
+{
+    if ((unsigned)id >= STR_COUNT) return "?";
+    const char *lang = settings_language();
+    const char *s = (lang && lang[0] == 'e') ? EN[id] : FR[id];
+    if (!s) s = FR[id];
+    return s ? s : "?";
+}

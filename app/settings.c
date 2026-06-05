@@ -12,6 +12,7 @@ static char s_pass[64]    = "bugquest-lora";
 static char s_tz[64]      = "Europe/Paris";
 static int  s_mesh_en     = 1;     /* 1 = l'UI se connecte a meshtasticd */
 static int  s_screen_to   = 0;     /* veille ecran : secondes, 0 = jamais */
+static char s_lang[4]     = "fr";  /* "fr" ou "en" */
 
 static void copy_in(char *dst, size_t cap, const char *src)
 {
@@ -43,6 +44,9 @@ void settings_load(void)
         else if (!strcmp(key, "timezone"))     copy_in(s_tz,   sizeof(s_tz),   val);
         else if (!strcmp(key, "mesh_enabled")) s_mesh_en = (val[0] == '0') ? 0 : 1;
         else if (!strcmp(key, "screen_timeout")) s_screen_to = atoi(val);
+        else if (!strcmp(key, "language")) {
+            if (!strcmp(val, "en") || !strcmp(val, "fr")) copy_in(s_lang, sizeof(s_lang), val);
+        }
     }
     fclose(f);
 }
@@ -58,6 +62,7 @@ void settings_save(void)
     fprintf(f, "timezone=%s\n",     s_tz);
     fprintf(f, "mesh_enabled=%d\n", s_mesh_en);
     fprintf(f, "screen_timeout=%d\n", s_screen_to);
+    fprintf(f, "language=%s\n",       s_lang);
     fclose(f);
 }
 
@@ -67,6 +72,7 @@ const char *settings_hotspot_pass(void) { return s_pass; }
 const char *settings_timezone(void)     { return s_tz; }
 bool        settings_mesh_enabled(void)  { return s_mesh_en != 0; }
 int         settings_screen_timeout(void) { return s_screen_to; }
+const char *settings_language(void)       { return s_lang; }
 
 void settings_set_node_name(const char *v)    { copy_in(s_node, sizeof(s_node), v); }
 void settings_set_hotspot_ssid(const char *v) { copy_in(s_ssid, sizeof(s_ssid), v); }
@@ -74,3 +80,6 @@ void settings_set_hotspot_pass(const char *v) { copy_in(s_pass, sizeof(s_pass), 
 void settings_set_timezone(const char *v)     { copy_in(s_tz,   sizeof(s_tz),   v); }
 void settings_set_mesh_enabled(bool v)        { s_mesh_en = v ? 1 : 0; }
 void settings_set_screen_timeout(int s)       { s_screen_to = (s < 0) ? 0 : s; }
+void settings_set_language(const char *v) {
+    if (v && (!strcmp(v, "fr") || !strcmp(v, "en"))) copy_in(s_lang, sizeof(s_lang), v);
+}
