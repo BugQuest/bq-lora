@@ -379,7 +379,7 @@ static void build_chat(void) {
     msg_seen = mesh_rx_msg_total();   /* ouverture du CHAT = tout marque comme lu */
     /* rangée des canaux */
     lv_obj_t *chans = lv_obj_create(content);
-    lv_obj_set_size(chans, LV_PCT(100), 28);
+    lv_obj_set_size(chans, LV_PCT(100), 38);
     flat(chans);
     lv_obj_set_flex_flow(chans, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(chans, 4, 0);
@@ -389,7 +389,7 @@ static void build_chat(void) {
     for (int i = 0; i < mesh_channel_count(); i++) {
         const mesh_channel_t *c = mesh_channel(i);
         lv_obj_t *chip = lv_button_create(chans);
-        lv_obj_set_height(chip, 22);
+        lv_obj_set_height(chip, 28);
         lv_obj_set_style_radius(chip, 2, 0);
         lv_obj_set_style_shadow_width(chip, 0, 0);
         bool active = (i == cur_chan);
@@ -408,7 +408,7 @@ static void build_chat(void) {
     /* bouton de gestion des canaux (⚙) en bout de rangée — plus large pour
      * etre facile a viser au doigt sur un ecran resistif */
     lv_obj_t *mgr = lv_button_create(chans);
-    lv_obj_set_size(mgr, 48, 32);
+    lv_obj_set_size(mgr, 48, 30);
     lv_obj_set_style_radius(mgr, 2, 0);
     lv_obj_set_style_shadow_width(mgr, 0, 0);
     lv_obj_set_style_bg_opa(mgr, LV_OPA_20, 0);
