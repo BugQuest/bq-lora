@@ -358,7 +358,7 @@ meshtastic-screen/
 │   ├── CMakeLists.txt         # GLOB sur *.c
 │   ├── main.c                 # tick + display fbdev + touch + ui_init
 │   ├── ui.c / ui.h            # toute l'UI : hub, chat, nodes, sys, badusb, bt, modales
-│   ├── theme.h                # palette cyberpunk + polices
+│   ├── theme.h                # palette + polices
 │   ├── mesh.c / mesh.h        # backend Meshtastic : client API TCP 4403 (protobuf natif)
 │   │                          # + persistance nodes.db (first/last/best_snr, atomic save)
 │   ├── pb.c / pb.h            # codec protobuf minimal (wire format, sans nanopb)
@@ -426,7 +426,7 @@ meshtastic-screen/
 - [x] Mise à jour OTA depuis l'UI (`git` + rebuild + restart, barre de progression)
 - [x] Démarrage automatique appliance (services systemd, splash boot/arrêt, console détachée)
 
-### Interface (cyberpunk minimaliste)
+### Interface
 
 - [x] Identité **BugQuest // LORA** (boot splash PIL + splash app LVGL animé)
 - [x] Topbar : nom du nœud + horloge ; **barre d'état verticale** (icônes système +
@@ -479,17 +479,26 @@ meshtastic-screen/
 
 Fixée sur le bord **gauche** de l'écran, rafraîchie toutes les 1,5 s. De haut en bas :
 
-| Icône | Rôle | États / couleurs |
-|-------|------|------------------|
-| 🔌 USB | Lien USB vers le PC | cyan = bail DHCP `usb0` actif **et** entrée ARP en état live (REACHABLE / PERMANENT) ; atténué sinon — pas de faux positif quand le câble est dérangé (sur Pi Zero, dwc2 n'a pas de VBUS-sense, donc on ne peut pas se fier au carrier) |
-| 📶 WiFi | État réseau WiFi | cyan = client connecté ; magenta = point d'accès (hotspot) ; atténué = aucun lien |
+| Icône (LVGL) | Rôle | États / couleurs |
+|---|---|---|
+| **USB** (`LV_SYMBOL_USB`) | Lien USB vers le PC | cyan = bail DHCP `usb0` actif **et** entrée ARP en état live (REACHABLE / PERMANENT) ; atténué sinon — pas de faux positif quand le câble est dérangé (sur Pi Zero, dwc2 n'a pas de VBUS-sense, donc on ne peut pas se fier au carrier) |
+| **WiFi** (`LV_SYMBOL_WIFI`) | État réseau WiFi | cyan = client connecté ; magenta = point d'accès (hotspot) ; atténué = aucun lien |
 | *(séparateur)* | — | sépare le groupe système du groupe LoRa |
-| ➤ Lien mesh | Liaison vers `meshtasticd` (API TCP 4403) | vert = établie et configurée ; magenta = absente |
-| ▤ + n | Nombre de nœuds vus sur le mesh | valeur en clair (atténuée si lien mesh coupé) |
-| ↻ + % | Utilisation du canal (air time) | atténué < 40 % ; ambre ≥ 40 % (canal chargé) |
-| ⚡ / batterie | Batterie du nœud | symbole batterie gradué (vert > 20 %, ambre sinon) ; éclair atténué si pas d'alim batterie (cas portduino sur secteur) |
+| **GPS** (`LV_SYMBOL_GPS`) | Liaison vers `meshtasticd` (API TCP 4403) | vert = établie et configurée ; magenta = absente |
+| **Liste** + n (`LV_SYMBOL_LIST`) | Nombre de nœuds vus sur le mesh | valeur en clair (atténuée si lien mesh coupé) |
+| **Loop** + % (`LV_SYMBOL_LOOP`) | Utilisation du canal (air time) | atténué < 40 % ; ambre ≥ 40 % (canal chargé) |
+| **Batterie** (`LV_SYMBOL_BATTERY_*`) | Batterie du nœud | symbole batterie gradué (vert > 20 %, ambre sinon) ; éclair (`LV_SYMBOL_CHARGE`) atténué si pas d'alim batterie (cas portduino sur secteur) |
 
-Les valeurs LoRa proviennent de `mesh_self()` (région, preset, batterie, utilisation canal, nœuds) alimenté par le flux protobuf de `meshtasticd`.
+#### Alertes système (auto-cachées tant que tout va bien)
+
+| Icône (LVGL) | Condition | États / couleurs |
+|---|---|---|
+| **⚠ Warning** (`LV_SYMBOL_WARNING`) | Throttling / sous-tension (`vcgencmd get_throttled` ≠ 0) | **magenta** = en cours ; **ambre** = déjà eu seulement |
+| **⚠ Warning** (`LV_SYMBOL_WARNING`) + `T°C` | CPU temp ≥ 70 °C | **ambre** 70–79 °C ; **magenta** ≥ 80 °C |
+| **💾 SD card** (`LV_SYMBOL_SD_CARD`) + `%` | Disque `/` ≥ 85 % d'usage | **ambre** 85–94 % ; **magenta** ≥ 95 % |
+| **⌨ Keyboard** (`LV_SYMBOL_KEYBOARD`) ou **💽 Drive** (`LV_SYMBOL_DRIVE`) | Gadget USB en mode HID ou STORAGE (SSH-USB tombé) | **magenta** HID ; **ambre** STORAGE |
+
+Les valeurs LoRa proviennent de `mesh_self()` (région, preset, batterie, utilisation canal, nœuds) alimenté par le flux protobuf de `meshtasticd`. Les alertes système viennent de `sys_warn_get()` (sondage léger : `/sys/class/thermal/...`, `df`, `vcgencmd`, sans `nmcli`).
 
 #### Gestion des canaux (modal ⚙)
 
@@ -548,6 +557,6 @@ identique au format de l'application Meshtastic officielle.
       canvas-clippé + `transform_scale` + pan du mode navigation photo.
 - [ ] Carnet de contacts / nœuds favoris (alias, notes)
 - [ ] Réglages radio dans l'UI (région, preset, hop limit, TX power)
-- [ ] Variantes de thèmes (palettes cyberpunk alternatives)
+- [ ] Variantes de thèmes (palettes alternatives)
 - [ ] Graphes CPU/RAM/temp en temps réel (sparkline)
 - [x] Mode économie (extinction écran après inactivité, réveil au toucher)
