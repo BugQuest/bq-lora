@@ -12,24 +12,35 @@ au doigt sur l'écran, sans CLI ni application tierce.
 
 - **Messagerie mesh** — canaux public + chiffrés (PSK AES256), envoi/réception de
   texte avec ACK, badge de messages non lus, clavier virtuel.
-- **Nœuds** — liste temps réel des nœuds vus (nom, SNR/RSSI, batterie, sauts,
-  dernier contact).
+- **Nœuds** — liste **temps réel** des nœuds vus (nom, SNR/RSSI + SNR max, batterie,
+  sauts, « vu il y a X »), **tri** commutable (récent / meilleur SNR), **persistance
+  locale** (premier contact, dernier contact, meilleur SNR jamais vu — survit aux
+  reboots), maj **incrémentale** sans recréer la liste (pas de saut de scroll), et
+  ligne radio en tête (région / preset / TX power / hop limit).
 - **Gestion des canaux** — créer / renommer / supprimer / partager (QR + URL
   `meshtastic.org/e/#…`) / importer, intégralement depuis l'écran.
-- **Réseau** — client WiFi (scan + connexion), hotspot WiFi (avec QR d'appairage),
-  accès SSH filaire par **gadget USB CDC NCM** (compatible Windows 11).
+- **Réseau** — client WiFi (scan + connexion), **scanner QR WiFi** (au format standard
+  `WIFI:T:WPA;S:…;P:…;;` via libzbar), **WPS push-button** (via `wpa_cli wps_pbc`),
+  hotspot WiFi (avec QR d'appairage), accès SSH filaire par **gadget USB CDC NCM**
+  (compatible Windows 11).
 - **Bluetooth** — scan/appairage BLE et **console série** (SPP/RFCOMM) pour piloter
   le Pi depuis un terminal Bluetooth (cf. [docs/bluetooth.md](docs/bluetooth.md)).
 - **Bad USB** — bascule du gadget en clavier **HID** (exécution de scripts type
   *DuckyScript*) ou en **stockage de masse** (dépôt de scripts depuis le PC), avec
   explorateur de fichiers intégré.
 - **Caméra** — viseur **temps réel** (caméra CSI IMX219) directement dans l'UI,
-  capture de photos en pleine résolution, et **galerie** de consultation
-  (navigation, suppression) — le tout au doigt sur l'écran.
-- **Système** — infos (CPU/RAM/disque/temp/alim/IP), alimentation, SSH, écran
-  (luminosité PWM, calibration tactile 5 points), logs `journalctl`.
+  capture de photos en pleine résolution, et **galerie** avec **mode navigation**
+  (zoom progressif jusqu'à la résolution HD native, pan tactile au doigt, viewport
+  clippé) — le tout au doigt sur l'écran.
+- **Système** — vue **découpée en 3 sous-onglets** (SYSTÈME / RÉSEAU / RÉGLAGES)
+  pour limiter le scroll sur l'écran SPI (bottleneck bande passante) : infos
+  (CPU/RAM/disque/temp/alim/IP), alimentation, SSH, écran (luminosité PWM,
+  calibration tactile 5 points, veille avec réveil au toucher), logs `journalctl`,
+  bascule de langue.
 - **Réglages** — nom du nœud, SSID/passphrase du hotspot, fuseau horaire,
   activation du mesh — sans recompiler.
+- **Bilingue FR / EN** — interface complète dans les deux langues, bascule en un
+  tap depuis la vue SYSTÈME, **persistante** (`/home/bq-lora/meshui/config.ini`).
 - **Mise à jour OTA** — `git pull` + rebuild + redémarrage depuis l'UI, avec barre
   de progression.
 
@@ -271,6 +282,13 @@ Côté UI :
 - **Galerie** — parcours des photos (navigation cyclique, suppression confirmée) ;
   chaque vignette est convertie en RGB565 par [`tools/cam.py`](tools/cam.py) (JPEG →
   buffer brut pour le canvas, vectorisé NumPy avec repli Python pur).
+- **Mode navigation (zoom + pan)** — depuis la galerie, un bouton 👁 charge une
+  preview HD 768×576 dans un canvas plein-cadre clippé par le frame d'affichage.
+  Le zoom utilise `transform_scale` LVGL (de l'échelle « fit » jusqu'au 1:1 HD,
+  soit ×3 par rapport au fit) et le pan utilise `lv_obj_set_pos` mis à jour par
+  `lv_indev_get_vect()` sur `LV_EVENT_PRESSING` (drag tactile). Une barre de
+  contrôles dédiée remplace temporairement la nav précédent/suivant : ⊖ / × / ⊕
+  / ↻ (fit) / ✕ (quitter le mode nav).
 
 > Le dossier `~/meshui/photos/` est un répertoire **runtime** (jamais versionné).
 > Si l'image reste noire, vérifier d'abord la **nappe CSI** (un défaut de contact
@@ -284,12 +302,20 @@ Côté UI :
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential cmake git rpicam-apps python3-pil
+sudo apt install -y build-essential cmake git rpicam-apps python3-pil \
+                    libzbar0 libzbar-dev wpasupplicant
 ```
 
-> `rpicam-apps` (viseur live + capture) et `python3-pil` (conversion des previews
-> caméra) sont requis par l'app **Caméra/Galerie** ; `provision.sh` les installe
-> automatiquement.
+> - `rpicam-apps` (viseur live + capture) et `python3-pil` (conversion des previews
+>   caméra) sont requis par l'app **Caméra/Galerie**.
+> - `libzbar0` / `libzbar-dev` fournissent le décodeur de QR-codes utilisé par le
+>   **scanner WiFi-QR** (lien C `-lzbar` dans `app/CMakeLists.txt`).
+> - `wpasupplicant` (déjà présent quand NetworkManager pilote le WiFi) expose le
+>   socket `/run/wpa_supplicant/wlan0` que `meshui-ctl wifi-wps` utilise pour
+>   déclencher un **push-button WPS** — NetworkManager ne sachant plus le faire
+>   nativement depuis ~2017.
+>
+> `provision.sh` les installe automatiquement.
 
 ### Récupération de LVGL
 
@@ -334,9 +360,12 @@ meshtastic-screen/
 │   ├── ui.c / ui.h            # toute l'UI : hub, chat, nodes, sys, badusb, bt, modales
 │   ├── theme.h                # palette cyberpunk + polices
 │   ├── mesh.c / mesh.h        # backend Meshtastic : client API TCP 4403 (protobuf natif)
+│   │                          # + persistance nodes.db (first/last/best_snr, atomic save)
 │   ├── pb.c / pb.h            # codec protobuf minimal (wire format, sans nanopb)
 │   ├── sys.c / sys.h          # infos système, actions privilégiées, WiFi/BT/USB/OTA async
-│   ├── settings.c / .h        # réglages persistants (nom nœud, hotspot, fuseau, mesh)
+│   │                          # + sys_qr_* (scanner QR libzbar) + sys_wifi_wps_async
+│   ├── settings.c / .h        # réglages persistants (nom nœud, hotspot, fuseau, mesh, langue)
+│   ├── i18n.c / i18n.h        # bilingue FR/EN : enum STR_* + tables + tr()
 │   ├── touch.c / touch.h      # pilote tactile maison (evdev + affine + lissage)
 │   └── calib.c / calib.h      # calibrage 5 points moindres carrés
 ├── config/
@@ -406,27 +435,45 @@ meshtastic-screen/
       BAD USB, CAMERA, GALERIE, SYSTÈME, À PROPOS) avec badge de messages non lus
 - [x] **MESSAGES** : canaux public + chiffrés, fil de messages avec ACK, clavier virtuel,
       bouton **⚙ gestion des canaux** → modal complet (voir ci-dessous)
-- [x] **NODES** : liste des nœuds **réels** (nom, SNR/RSSI, batterie, sauts, dernier contact)
-- [x] **WIFI** : SSID/signal + modal scan + connexion avec saisie passphrase
+- [x] **NODES** : liste des nœuds **réels** avec ligne radio en tête (région / preset /
+      TX dBm / hop limit) ; chaque ligne montre nom, ID, SNR + **SNR max persistant**,
+      RSSI, batterie, sauts, **« vu il y a X »** ; **tri commutable** RÉCENT / SNR via
+      un bouton dédié ; **mise à jour incrémentale** (cache par node `num` +
+      `lv_obj_move_to_index` → pas de saut de scroll, le label « vu il y a X »
+      défile en direct) ; **persistance locale** dans `~/meshui/nodes.db` (atomique
+      tmp+rename, throttle 30 s) — `first_heard` / `last_heard` / `best_snr` /
+      `name` survivent aux reboots ; `MAX_NODES = 200`
+- [x] **WIFI** : SSID/signal + modal scan + connexion avec saisie passphrase ;
+      **scanner QR WiFi** (viewfinder caméra 320×240, libzbar sur le plan Y de
+      `rpicam-vid`, parse du format standard `WIFI:T:…;S:…;P:…;;`) + **WPS
+      push-button** (timer 120 s, déclenche `wpa_cli -i wlan0 wps_pbc` puis surveille
+      `nmcli` pour détecter l'association)
 - [x] **BLUETOOTH** : scan/appairage des périphériques + bascule de la console série
 - [x] **HOTSPOT** : état + toggle + QR code WiFi pour scan téléphone
 - [x] **BAD USB** : explorateur de scripts, bascule HID/STORAGE, exécution *DuckyScript*
 - [x] **CAMERA** : viseur live (`rpicam-vid` YUV420 → RGB565 dans un canvas), bouton
       CAPTURE (photo pleine résolution `rpicam-still` → `~/meshui/photos/`), accès galerie
 - [x] **GALERIE** : consultation des photos (canvas RGB565 via `tools/cam.py`),
-      navigation précédent/suivant cyclique, suppression confirmée
-- [x] **SYSTÈME** :
-  - INFO (hostname, IPs wlan/usb, uptime, CPU temp, RAM, disque, alim, kernel)
-  - ALIMENTATION (Éteindre / Redémarrer avec confirmation)
-  - SSH (état + ACTIVER/DESACTIVER)
-  - USB (mode + état réel + IP côté Pi)
-  - ECRAN (slider luminosité PWM, BIP test, CALIBRER)
-  - RÉGLAGES (nom du nœud, SSID/passphrase hotspot, fuseau, mesh on/off)
-  - MISE À JOUR (vérifier + installer l'OTA)
-  - APPLICATION (RELANCER MESHUI)
-  - LOG SYSTÈME (`journalctl -n 30` scrollable + rafraîchir)
+      navigation précédent/suivant cyclique, suppression confirmée, **mode navigation
+      zoom + pan** (preview HD 768×576, `transform_scale` LVGL + drag tactile)
+- [x] **SYSTÈME** — découpée en **3 sous-onglets** (chips en tête : SYSTÈME / RÉSEAU /
+      RÉGLAGES) pour rester fluide malgré le bottleneck SPI de l'ILI9486 (chaque
+      sous-onglet tient quasi dans la hauteur visible) :
+  - **SYSTÈME** : INFO (hostname, IPs wlan/usb, uptime, CPU temp, RAM, disque, alim,
+    kernel) · ALIMENTATION (Éteindre / Redémarrer) · APPLICATION (Relancer meshui) ·
+    MISE À JOUR (vérifier + installer l'OTA) · **LANGUE** (bascule FR ⇄ EN)
+  - **RÉSEAU** : SSH (état + ACTIVER/DESACTIVER) · BLUETOOTH (état + toggle) ·
+    USB (état + IP Pi + bascule partage / client ICS)
+  - **RÉGLAGES** : RÉGLAGES (nom du nœud, SSID/pass hotspot, fuseau, mesh on/off) ·
+    ÉCRAN (slider luminosité PWM, BIP, CALIBRER, veille avec réveil au toucher) ·
+    LOG SYSTÈME (`journalctl -n 30` scrollable + rafraîchir)
 - [x] **À PROPOS** : matériel, logiciel, projet/auteur
 - [x] Modal de calibration tactile (croix rouges, 5 points)
+- [x] **Internationalisation FR / EN** : module `app/i18n.{c,h}` avec enum `STR_*` +
+      tables `fr[]` / `en[]`, fonction `tr(STR_X)` qui résout via
+      `settings_language()` ; bouton de bascule en bas de SYSTÈME → persiste dans
+      `config.ini` + rebuild de la vue courante (les chaînes statiques se mettent à
+      jour immédiatement, les format-strings gardent leurs placeholders)
 
 #### Barre d'état verticale (légende des icônes)
 
@@ -434,7 +481,7 @@ Fixée sur le bord **gauche** de l'écran, rafraîchie toutes les 1,5 s. De haut
 
 | Icône | Rôle | États / couleurs |
 |-------|------|------------------|
-| 🔌 USB | Lien USB vers le PC | cyan = bail DHCP `usb0` actif ; atténué = non connecté |
+| 🔌 USB | Lien USB vers le PC | cyan = bail DHCP `usb0` actif **et** entrée ARP en état live (REACHABLE / PERMANENT) ; atténué sinon — pas de faux positif quand le câble est dérangé (sur Pi Zero, dwc2 n'a pas de VBUS-sense, donc on ne peut pas se fier au carrier) |
 | 📶 WiFi | État réseau WiFi | cyan = client connecté ; magenta = point d'accès (hotspot) ; atténué = aucun lien |
 | *(séparateur)* | — | sépare le groupe système du groupe LoRa |
 | ➤ Lien mesh | Liaison vers `meshtasticd` (API TCP 4403) | vert = établie et configurée ; magenta = absente |
@@ -493,9 +540,14 @@ identique au format de l'application Meshtastic officielle.
 
 ### Pistes d'évolution
 
-- [ ] Position GPS des nœuds → vue carte hors-ligne (tuiles préchargées)
-- [ ] Mode économie (extinction écran après inactivité, réveil au toucher)
+- [ ] **Carte locale hors-ligne** des nœuds — tuiles raster pré-converties en
+      RGB565 sur la SD (`/home/bq-lora/meshui/map/{z}/{x}/{y}.rgb565`, schéma
+      Slippy / Leaflet), tracé des nœuds depuis leur Position protobuf (lat/lon
+      `latitude_i` / `longitude_i` × 1e-7) ; tuilage généré hors-ligne par
+      `tools/prep_map.py` à partir d'un mbtiles OSM + bbox. Réutilise le pattern
+      canvas-clippé + `transform_scale` + pan du mode navigation photo.
 - [ ] Carnet de contacts / nœuds favoris (alias, notes)
-- [ ] Réglages radio dans l'UI (région, preset, hop limit)
+- [ ] Réglages radio dans l'UI (région, preset, hop limit, TX power)
 - [ ] Variantes de thèmes (palettes cyberpunk alternatives)
 - [ ] Graphes CPU/RAM/temp en temps réel (sparkline)
+- [x] Mode économie (extinction écran après inactivité, réveil au toucher)
