@@ -1602,27 +1602,37 @@ static void wifi_btn_cb(lv_event_t *e) { (void)e; wifi_modal_open(); }
 
 static void sys_refresh(lv_timer_t *t) {
     (void)t;
-    if (!sys_lbl_host) return;
+    /* La vue SYSTEME est decoupee en sous-onglets ; selon celui qui est
+     * affiche, seule une partie des labels est vivante. On verifie chaque
+     * groupe individuellement. sys_info_get() etant couteux (nmcli, lectures
+     * /proc), on ne l'appelle que si au moins un consommateur est vivant. */
+    bool have_info = sys_lbl_host != NULL;
+    bool need_info = have_info || sys_lbl_wifi || sys_lbl_usb_state || sys_lbl_usb_ip;
     sys_info_t i;
-    sys_info_get(&i);
+    if (need_info) sys_info_get(&i);
     char b[80];
-    lv_label_set_text(sys_lbl_host,   i.hostname);
-    lv_label_set_text(sys_lbl_ipw,    i.ip_wlan);
-    lv_label_set_text(sys_lbl_ipu,    i.ip_usb);
-    lv_label_set_text(sys_lbl_uptime, i.uptime);
-    snprintf(b, sizeof(b), "%.1f C", i.cpu_temp_c);  lv_label_set_text(sys_lbl_cpu, b);
-    snprintf(b, sizeof(b), "%d / %d MB", i.mem_used_mb, i.mem_total_mb); lv_label_set_text(sys_lbl_mem, b);
-    snprintf(b, sizeof(b), "%d %%", i.disk_used_pct); lv_label_set_text(sys_lbl_disk, b);
-    lv_label_set_text(sys_lbl_thr, i.throttled_now ? tr(STR_POWER_LOW) : (i.throttled_ever ? tr(STR_POWER_PREV) : tr(STR_POWER_OK)));
-    lv_obj_set_style_text_color(sys_lbl_thr,
-        lv_color_hex(i.throttled_now ? CY_AMBER : (i.throttled_ever ? CY_DIM : CY_GREEN)), 0);
-    lv_label_set_text(sys_lbl_kernel, i.kernel);
+    if (have_info) {
+        lv_label_set_text(sys_lbl_host,   i.hostname);
+        lv_label_set_text(sys_lbl_ipw,    i.ip_wlan);
+        lv_label_set_text(sys_lbl_ipu,    i.ip_usb);
+        lv_label_set_text(sys_lbl_uptime, i.uptime);
+        snprintf(b, sizeof(b), "%.1f C", i.cpu_temp_c);  lv_label_set_text(sys_lbl_cpu, b);
+        snprintf(b, sizeof(b), "%d / %d MB", i.mem_used_mb, i.mem_total_mb); lv_label_set_text(sys_lbl_mem, b);
+        snprintf(b, sizeof(b), "%d %%", i.disk_used_pct); lv_label_set_text(sys_lbl_disk, b);
+        lv_label_set_text(sys_lbl_thr, i.throttled_now ? tr(STR_POWER_LOW) : (i.throttled_ever ? tr(STR_POWER_PREV) : tr(STR_POWER_OK)));
+        lv_obj_set_style_text_color(sys_lbl_thr,
+            lv_color_hex(i.throttled_now ? CY_AMBER : (i.throttled_ever ? CY_DIM : CY_GREEN)), 0);
+        lv_label_set_text(sys_lbl_kernel, i.kernel);
+    }
 
-    bool running = sys_ssh_running();
-    lv_label_set_text(sys_lbl_ssh_state, running ? tr(STR_STATE_ACTIVE) : tr(STR_STATE_STOPPED));
-    lv_obj_set_style_text_color(sys_lbl_ssh_state,
-        lv_color_hex(running ? CY_GREEN : CY_DIM), 0);
-    lv_label_set_text(sys_lbl_ssh_btn, running ? tr(STR_BTN_DISABLE) : tr(STR_BTN_ENABLE));
+    if (sys_lbl_ssh_state) {
+        bool running = sys_ssh_running();
+        lv_label_set_text(sys_lbl_ssh_state, running ? tr(STR_STATE_ACTIVE) : tr(STR_STATE_STOPPED));
+        lv_obj_set_style_text_color(sys_lbl_ssh_state,
+            lv_color_hex(running ? CY_GREEN : CY_DIM), 0);
+        if (sys_lbl_ssh_btn)
+            lv_label_set_text(sys_lbl_ssh_btn, running ? tr(STR_BTN_DISABLE) : tr(STR_BTN_ENABLE));
+    }
 
     if (sys_lbl_wifi) {
         if (i.wifi_signal >= 0)
