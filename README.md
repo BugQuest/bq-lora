@@ -23,6 +23,9 @@ au doigt sur l'écran, sans CLI ni application tierce.
 - **Bad USB** — bascule du gadget en clavier **HID** (exécution de scripts type
   *DuckyScript*) ou en **stockage de masse** (dépôt de scripts depuis le PC), avec
   explorateur de fichiers intégré.
+- **Caméra** — viseur **temps réel** (caméra CSI IMX219) directement dans l'UI,
+  capture de photos en pleine résolution, et **galerie** de consultation
+  (navigation, suppression) — le tout au doigt sur l'écran.
 - **Système** — infos (CPU/RAM/disque/temp/alim/IP), alimentation, SSH, écran
   (luminosité PWM, calibration tactile 5 points), logs `journalctl`.
 - **Réglages** — nom du nœud, SSID/passphrase du hotspot, fuseau horaire,
@@ -46,6 +49,7 @@ au doigt sur l'écran, sans CLI ni application tierce.
 | Écran          | MKS TS35-R V2.0 — 480×320, contrôleur **ILI9488** (SPI) |
 | Tactile        | **XPT2046** résistif (SPI) — driver Linux `ads7846` |
 | Radio LoRa     | Waveshare **Core1262-868M** (puce **SX1262**, 868 MHz) sur SPI1 |
+| Caméra         | Module CSI **Freenove IMX219** (8 MP, 3280×2464, objectif 120°) |
 | Extras         | Beeper (GPIO17), rétroéclairage BLK (GPIO18) |
 
 ### Câblage (bus matériel SPI0)
@@ -242,14 +246,50 @@ de référence (validée sur Pi Zero 2 W, RPi OS trixie arm64) :
 
 ---
 
+## Caméra CSI (IMX219)
+
+Le module caméra (Freenove IMX219) est branché sur le **port CSI** du Pi et piloté
+par **`libcamera` / `rpicam-apps`**. L'auto-détection (`camera_auto_detect`) échouant
+sur ce clone, on force l'overlay explicite **`dtoverlay=imx219`** (déjà inclus dans
+[`config/config.txt.append`](config/config.txt.append) et posé par `provision.sh`).
+
+Vérification après reboot :
+
+```bash
+rpicam-hello --list-cameras            # le capteur imx219 doit apparaître
+```
+
+Côté UI :
+
+- **Viseur live** — `rpicam-vid` diffuse un flux **YUV420 256×192 ~12 fps** que
+  `app/sys.c` convertit en RGB565 et pousse dans un `lv_canvas` (largeur multiple de
+  64 → frame compacte, sans *padding* de stride). La caméra étant mono-accès, le flux
+  est démarré à l'ouverture de la page et arrêté proprement au changement d'onglet.
+- **Capture HD** — le bouton CAPTURE coupe brièvement le flux, prend une photo en
+  pleine résolution via `rpicam-still` (enregistrée dans `~/meshui/photos/`), puis le
+  live reprend.
+- **Galerie** — parcours des photos (navigation cyclique, suppression confirmée) ;
+  chaque vignette est convertie en RGB565 par [`tools/cam.py`](tools/cam.py) (JPEG →
+  buffer brut pour le canvas, vectorisé NumPy avec repli Python pur).
+
+> Le dossier `~/meshui/photos/` est un répertoire **runtime** (jamais versionné).
+> Si l'image reste noire, vérifier d'abord la **nappe CSI** (un défaut de contact
+> donne `-EREMOTEIO` côté i2c : capteur non détecté malgré le bon driver).
+
+---
+
 ## Application LVGL
 
 ### Dépendances (sur le Pi)
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential cmake git
+sudo apt install -y build-essential cmake git rpicam-apps python3-pil
 ```
+
+> `rpicam-apps` (viseur live + capture) et `python3-pil` (conversion des previews
+> caméra) sont requis par l'app **Caméra/Galerie** ; `provision.sh` les installe
+> automatiquement.
 
 ### Récupération de LVGL
 
@@ -300,7 +340,7 @@ meshtastic-screen/
 │   ├── touch.c / touch.h      # pilote tactile maison (evdev + affine + lissage)
 │   └── calib.c / calib.h      # calibrage 5 points moindres carrés
 ├── config/
-│   ├── config.txt.append      # overlays fbtft + ads7846 + pwm + dwc2 + spi1 (LoRa)
+│   ├── config.txt.append      # overlays fbtft + ads7846 + pwm + dwc2 + spi1 (LoRa) + imx219 (caméra)
 │   └── lora.yaml              # config meshtasticd SX1262 (-> /etc/meshtasticd/config.d/)
 ├── deploy/                    # à installer sur le Pi
 │   ├── provision.sh           # premier-boot : build + services + radio + sudoers
@@ -326,6 +366,7 @@ meshtastic-screen/
 │   └── usb0-ignore-carrier.conf# NM : monte usb0 sans attendre de carrier
 ├── tools/                     # utilitaires Python (pas dans le binaire C)
 │   ├── splash.py              # boot splash PIL → fb0
+│   ├── cam.py                 # JPEG → buffer brut RGB565 pour le canvas (preview/galerie)
 │   ├── badusb.py              # interpréteur DuckyScript → frappes HID
 │   ├── grab.py                # capture fb0 → PNG (dev)
 │   ├── touchcal.py            # relevé tactile brut (dev)
@@ -346,6 +387,8 @@ meshtastic-screen/
 - [x] Tactile XPT2046 (`ads7846`) — pilote maison evdev + lissage doigt
 - [x] Calibrage tactile 5 points (affine moindres carrés, persistant)
 - [x] Beeper GPIO17 piloté via `gpiozero`
+- [x] Caméra CSI **IMX219** (overlay `dtoverlay=imx219`, `libcamera`/`rpicam-apps`) :
+      viseur live + capture HD + galerie
 - [x] Gadget USB multi-mode (configfs) : **CDC NCM** (réseau, Win11 OK), **HID**
       (clavier BadUSB), **mass storage** (dépôt de scripts) — commutable depuis l'UI
 - [x] `usb0` forcé actif au boot (anti-deadlock carrier) → SSH USB fiable au reboot
@@ -360,7 +403,7 @@ meshtastic-screen/
 - [x] Topbar : nom du nœud + horloge ; **barre d'état verticale** (icônes système +
       indicateurs LoRa, voir légende ci-dessous)
 - [x] **Hub d'accueil** : grille de cartes (MESSAGES, NODES, WIFI, BLUETOOTH, HOTSPOT,
-      BAD USB, SYSTÈME, À PROPOS) avec badge de messages non lus
+      BAD USB, CAMERA, GALERIE, SYSTÈME, À PROPOS) avec badge de messages non lus
 - [x] **MESSAGES** : canaux public + chiffrés, fil de messages avec ACK, clavier virtuel,
       bouton **⚙ gestion des canaux** → modal complet (voir ci-dessous)
 - [x] **NODES** : liste des nœuds **réels** (nom, SNR/RSSI, batterie, sauts, dernier contact)
@@ -368,6 +411,10 @@ meshtastic-screen/
 - [x] **BLUETOOTH** : scan/appairage des périphériques + bascule de la console série
 - [x] **HOTSPOT** : état + toggle + QR code WiFi pour scan téléphone
 - [x] **BAD USB** : explorateur de scripts, bascule HID/STORAGE, exécution *DuckyScript*
+- [x] **CAMERA** : viseur live (`rpicam-vid` YUV420 → RGB565 dans un canvas), bouton
+      CAPTURE (photo pleine résolution `rpicam-still` → `~/meshui/photos/`), accès galerie
+- [x] **GALERIE** : consultation des photos (canvas RGB565 via `tools/cam.py`),
+      navigation précédent/suivant cyclique, suppression confirmée
 - [x] **SYSTÈME** :
   - INFO (hostname, IPs wlan/usb, uptime, CPU temp, RAM, disque, alim, kernel)
   - ALIMENTATION (Éteindre / Redémarrer avec confirmation)
