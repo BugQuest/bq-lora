@@ -186,6 +186,11 @@ static const char *FR[STR_COUNT] = {
     [STR_USB_MODE_STORAGE_ACTIVE] = "STOCKAGE actif",
     [STR_USB_MODE_NET_ACTIVE] = "RESEAU actif",
 
+    /* Sous-onglets SYSTEME */
+    [STR_SYSTAB_SYSTEM] = "SYSTEME",
+    [STR_SYSTAB_NETWORK] = "RESEAU",
+    [STR_SYSTAB_SETTINGS] = "REGLAGES",
+
     /* Langue */
     [STR_LANG_FR] = "FR", [STR_LANG_EN] = "EN",
     [STR_LANG_BTN] = "  LANGUE",
@@ -370,6 +375,11 @@ static const char *EN[STR_COUNT] = {
     [STR_USB_MODE_KBD_ACTIVE] = "KEYBOARD active",
     [STR_USB_MODE_STORAGE_ACTIVE] = "STORAGE active",
     [STR_USB_MODE_NET_ACTIVE] = "NETWORK active",
+
+    /* SYSTEM sub-tabs */
+    [STR_SYSTAB_SYSTEM] = "SYSTEM",
+    [STR_SYSTAB_NETWORK] = "NETWORK",
+    [STR_SYSTAB_SETTINGS] = "SETTINGS",
 
     /* Language */
     [STR_LANG_FR] = "FR", [STR_LANG_EN] = "EN",

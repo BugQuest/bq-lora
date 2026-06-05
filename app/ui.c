@@ -1681,15 +1681,30 @@ static void sys_refresh(lv_timer_t *t) {
     }
 }
 
-static void build_sys(void) {
-    lv_obj_t *col = lv_obj_create(content);
-    lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
-    flat(col);
-    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(col, 5, 0);
-    lv_obj_set_style_pad_row(col, 3, 0);
-    lv_obj_set_scroll_dir(col, LV_DIR_VER);
+/* ---- Sous-onglets SYSTEME (decoupe en 3 vues pour reduire le scroll) ----
+ * Chaque sous-onglet ne contient que ses propres sections, donc beaucoup
+ * moins de widgets a poser : le rendu est instantane et le scroll reste
+ * fluide. sys_refresh continue de tourner globalement, les pointeurs des
+ * vues non-actives sont remis a NULL et les callbacks deviennent no-op. */
+static int       sys_subtab = 0;          /* 0 = systeme, 1 = reseau, 2 = reglages */
+static lv_obj_t *sys_content;
+static lv_obj_t *sys_chips[3];
 
+static void sys_null_widgets(void) {
+    sys_lbl_host = NULL; sys_lbl_ipw = NULL; sys_lbl_ipu = NULL;
+    sys_lbl_uptime = NULL; sys_lbl_cpu = NULL; sys_lbl_mem = NULL;
+    sys_lbl_disk = NULL; sys_lbl_thr = NULL; sys_lbl_kernel = NULL;
+    sys_lbl_ssh_state = NULL; sys_lbl_ssh_btn = NULL; sys_btn_ssh = NULL;
+    sys_lbl_bt_state = NULL; sys_lbl_bt_btn = NULL;
+    sys_lbl_usb_state = NULL; sys_lbl_usb_ip = NULL;
+    sys_btn_usb_share = NULL; sys_btn_usb_client = NULL;
+    upd_lbl_state = NULL; upd_lbl_hash = NULL; upd_btn_install = NULL;
+    sys_bl_lbl = NULL; sys_bl_slider = NULL; sys_sleep_lbl = NULL;
+    sys_log_ta = NULL;
+}
+
+static void sys_build_system_tab(lv_obj_t *col)
+{
     lv_obj_t *s = section(col, tr(STR_SEC_INFO));
     sys_lbl_host   = info_row(s, tr(STR_INFO_HOSTNAME));
     sys_lbl_ipw    = info_row(s, tr(STR_INFO_IP_WLAN));
@@ -1714,7 +1729,55 @@ static void build_sys(void) {
         small_button(row, b2, CY_CYAN,    reboot_cb);
     }
 
-    s = section(col, tr(STR_SEC_SSH));
+    s = section(col, tr(STR_SEC_APP));
+    {
+        char br[40]; snprintf(br, sizeof(br), LV_SYMBOL_REFRESH "%s", tr(STR_BTN_RESTART_APP));
+        small_button(s, br, CY_CYAN, restart_app_cb);
+    }
+
+    /* MISES A JOUR (git pull + rebuild + restart) */
+    s = section(col, tr(STR_SEC_UPDATES));
+    upd_lbl_state = label(s, "?", FONT_BODY, CY_DIM);
+    upd_lbl_hash  = label(s, "-", FONT_SMALL, CY_DIM);
+    lv_obj_t *urow = lv_obj_create(s);
+    lv_obj_set_size(urow, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(urow); lv_obj_set_flex_flow(urow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(urow, 6, 0);
+    lv_obj_clear_flag(urow, LV_OBJ_FLAG_SCROLLABLE);
+    {
+        char bv[40], bi[40];
+        snprintf(bv, sizeof(bv), LV_SYMBOL_REFRESH "%s",  tr(STR_BTN_CHECK_UPDATE));
+        snprintf(bi, sizeof(bi), LV_SYMBOL_DOWNLOAD "%s", tr(STR_BTN_INSTALL_UPDATE));
+        small_button(urow, bv, CY_CYAN, upd_check_cb);
+        upd_btn_install = small_button(urow, bi, CY_MAGENTA, upd_apply_cb);
+    }
+    lv_obj_add_flag(upd_btn_install, LV_OBJ_FLAG_HIDDEN);
+    upd_check_cb(NULL);
+
+    /* LANGUE */
+    s = section(col, tr(STR_SEC_LANG));
+    lv_obj_t *lang_btn = lv_button_create(s);
+    lv_obj_set_size(lang_btn, 130, 30);
+    lv_obj_set_style_radius(lang_btn, 2, 0);
+    lv_obj_set_style_bg_opa(lang_btn, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(lang_btn, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(lang_btn, 1, 0);
+    lv_obj_set_style_border_color(lang_btn, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_shadow_width(lang_btn, 0, 0);
+    lv_obj_add_event_cb(lang_btn, lang_toggle_cb, LV_EVENT_CLICKED, NULL);
+    {
+        const char *cur = settings_language();
+        char b[16]; snprintf(b, sizeof(b), "%s " LV_SYMBOL_RIGHT " %s",
+                             cur[0] == 'e' ? tr(STR_LANG_EN) : tr(STR_LANG_FR),
+                             cur[0] == 'e' ? tr(STR_LANG_FR) : tr(STR_LANG_EN));
+        lv_obj_t *ll = label(lang_btn, b, FONT_SMALL, CY_TEXT);
+        lv_obj_center(ll);
+    }
+}
+
+static void sys_build_network_tab(lv_obj_t *col)
+{
+    lv_obj_t *s = section(col, tr(STR_SEC_SSH));
     lv_obj_t *r2 = lv_obj_create(s);
     lv_obj_set_size(r2, LV_PCT(100), LV_SIZE_CONTENT);
     flat(r2); lv_obj_set_flex_flow(r2, LV_FLEX_FLOW_ROW);
@@ -1768,39 +1831,16 @@ static void build_sys(void) {
     lv_obj_clear_flag(unrow, LV_OBJ_FLAG_SCROLLABLE);
     sys_btn_usb_share  = small_button(unrow, tr(STR_BTN_NET_SHARE),  CY_CYAN,  usb_net_share_cb);
     sys_btn_usb_client = small_button(unrow, tr(STR_BTN_NET_CLIENT), CY_AMBER, usb_net_client_cb);
+}
 
-    s = section(col, tr(STR_SEC_SETTINGS));
+static void sys_build_settings_tab(lv_obj_t *col)
+{
+    lv_obj_t *s = section(col, tr(STR_SEC_SETTINGS));
     {
         char bm[40]; snprintf(bm, sizeof(bm), LV_SYMBOL_SETTINGS "%s", tr(STR_BTN_MODIFY));
         small_button(s, bm, CY_CYAN, settings_modal_open_e);
     }
     label(s, tr(STR_SETTINGS_DETAILS), FONT_SMALL, CY_DIM);
-
-    s = section(col, tr(STR_SEC_APP));
-    {
-        char br[40]; snprintf(br, sizeof(br), LV_SYMBOL_REFRESH "%s", tr(STR_BTN_RESTART_APP));
-        small_button(s, br, CY_CYAN, restart_app_cb);
-    }
-
-    /* MISES A JOUR (git pull + rebuild + restart, depuis github) */
-    s = section(col, tr(STR_SEC_UPDATES));
-    upd_lbl_state = label(s, "?", FONT_BODY, CY_DIM);
-    upd_lbl_hash  = label(s, "-", FONT_SMALL, CY_DIM);
-    lv_obj_t *urow = lv_obj_create(s);
-    lv_obj_set_size(urow, LV_PCT(100), LV_SIZE_CONTENT);
-    flat(urow); lv_obj_set_flex_flow(urow, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(urow, 6, 0);
-    lv_obj_clear_flag(urow, LV_OBJ_FLAG_SCROLLABLE);
-    {
-        char bv[40], bi[40];
-        snprintf(bv, sizeof(bv), LV_SYMBOL_REFRESH "%s",  tr(STR_BTN_CHECK_UPDATE));
-        snprintf(bi, sizeof(bi), LV_SYMBOL_DOWNLOAD "%s", tr(STR_BTN_INSTALL_UPDATE));
-        small_button(urow, bv, CY_CYAN, upd_check_cb);
-        upd_btn_install = small_button(urow, bi, CY_MAGENTA, upd_apply_cb);
-    }
-    lv_obj_add_flag(upd_btn_install, LV_OBJ_FLAG_HIDDEN);
-    /* auto-check au chargement de la page */
-    upd_check_cb(NULL);
 
     s = section(col, tr(STR_SEC_SCREEN));
     /* Luminosité — slider en % */
@@ -1873,28 +1913,86 @@ static void build_sys(void) {
         char bl[40]; snprintf(bl, sizeof(bl), LV_SYMBOL_REFRESH "%s", tr(STR_BTN_REFRESH_LOG));
         small_button(s, bl, CY_CYAN, log_refresh_cb);
     }
+}
 
-    /* ----- LANGUE : bascule FR / EN ----- */
-    s = section(col, tr(STR_SEC_LANG));
-    lv_obj_t *lang_btn = lv_button_create(s);
-    lv_obj_set_size(lang_btn, 130, 30);
-    lv_obj_set_style_radius(lang_btn, 2, 0);
-    lv_obj_set_style_bg_opa(lang_btn, LV_OPA_30, 0);
-    lv_obj_set_style_bg_color(lang_btn, lv_color_hex(CY_CYAN), 0);
-    lv_obj_set_style_border_width(lang_btn, 1, 0);
-    lv_obj_set_style_border_color(lang_btn, lv_color_hex(CY_CYAN), 0);
-    lv_obj_set_style_shadow_width(lang_btn, 0, 0);
-    lv_obj_add_event_cb(lang_btn, lang_toggle_cb, LV_EVENT_CLICKED, NULL);
-    {
-        const char *cur = settings_language();
-        char b[16]; snprintf(b, sizeof(b), "%s " LV_SYMBOL_RIGHT " %s",
-                             cur[0] == 'e' ? tr(STR_LANG_EN) : tr(STR_LANG_FR),
-                             cur[0] == 'e' ? tr(STR_LANG_FR) : tr(STR_LANG_EN));
-        lv_obj_t *ll = label(lang_btn, b, FONT_SMALL, CY_TEXT);
-        lv_obj_center(ll);
+/* Rebuild le contenu du sous-onglet courant + met a jour le style des chips. */
+static void sys_render_subtab(void)
+{
+    for (int i = 0; i < 3; i++) {
+        if (!sys_chips[i]) continue;
+        bool active = (i == sys_subtab);
+        lv_obj_set_style_bg_opa(sys_chips[i], active ? LV_OPA_30 : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_color(sys_chips[i],
+            lv_color_hex(active ? CY_CYAN : CY_BORDER), 0);
+    }
+    sys_null_widgets();
+    if (sys_content) lv_obj_clean(sys_content);
+    switch (sys_subtab) {
+        case 0: sys_build_system_tab(sys_content);   break;
+        case 1: sys_build_network_tab(sys_content);  break;
+        case 2: sys_build_settings_tab(sys_content); break;
+    }
+    sys_refresh(NULL);
+}
+
+static void sys_chip_cb(lv_event_t *e)
+{
+    sys_subtab = (int)(intptr_t)lv_event_get_user_data(e);
+    sys_render_subtab();
+}
+
+/* Vue SYSTEME : 3 chips de sous-onglet en tete + zone de contenu rebuildable.
+ * Chaque sous-onglet contient ~3 sections, donc beaucoup moins de widgets a
+ * dessiner que l'ancienne vue monobloc -> scroll fluide / tap instantane. */
+static void build_sys(void) {
+    sys_null_widgets();
+    sys_content = NULL;
+    for (int i = 0; i < 3; i++) sys_chips[i] = NULL;
+
+    lv_obj_t *root = lv_obj_create(content);
+    lv_obj_set_size(root, LV_PCT(100), LV_PCT(100));
+    flat(root);
+    lv_obj_set_flex_flow(root, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(root, 4, 0);
+    lv_obj_set_style_pad_row(root, 4, 0);
+    lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* barre de chips de sous-onglet (toujours visible) */
+    lv_obj_t *strip = lv_obj_create(root);
+    lv_obj_set_size(strip, LV_PCT(100), 30);
+    flat(strip);
+    lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(strip, 4, 0);
+    lv_obj_clear_flag(strip, LV_OBJ_FLAG_SCROLLABLE);
+
+    static const str_id_t labels[3] = { STR_SYSTAB_SYSTEM, STR_SYSTAB_NETWORK, STR_SYSTAB_SETTINGS };
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *chip = lv_button_create(strip);
+        lv_obj_set_flex_grow(chip, 1);
+        lv_obj_set_height(chip, 26);
+        lv_obj_set_style_radius(chip, 2, 0);
+        lv_obj_set_style_bg_color(chip, lv_color_hex(CY_CYAN), 0);
+        lv_obj_set_style_bg_opa(chip, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(chip, 1, 0);
+        lv_obj_set_style_border_color(chip, lv_color_hex(CY_BORDER), 0);
+        lv_obj_set_style_shadow_width(chip, 0, 0);
+        lv_obj_add_event_cb(chip, sys_chip_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        lv_obj_t *cl = label(chip, tr(labels[i]), FONT_SMALL, CY_TEXT);
+        lv_obj_center(cl);
+        sys_chips[i] = chip;
     }
 
-    sys_refresh(NULL);
+    /* zone de contenu scrollable (mais chaque sous-onglet tient presque dans
+     * la hauteur visible -> tres peu de scroll en pratique) */
+    sys_content = lv_obj_create(root);
+    lv_obj_set_width(sys_content, LV_PCT(100));
+    lv_obj_set_flex_grow(sys_content, 1);
+    flat(sys_content);
+    lv_obj_set_flex_flow(sys_content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(sys_content, 3, 0);
+    lv_obj_set_scroll_dir(sys_content, LV_DIR_VER);
+
+    sys_render_subtab();
     sys_refresh_timer = lv_timer_create(sys_refresh, 5000, NULL);
 }
 

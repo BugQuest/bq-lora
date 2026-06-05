@@ -119,6 +119,9 @@ typedef enum {
     STR_FMT_EXEC, STR_BADUSB_HEADER,
     STR_USB_MODE_KBD_ACTIVE, STR_USB_MODE_STORAGE_ACTIVE, STR_USB_MODE_NET_ACTIVE,
 
+    /* ---------- Sous-onglets SYSTEME ---------- */
+    STR_SYSTAB_SYSTEM, STR_SYSTAB_NETWORK, STR_SYSTAB_SETTINGS,
+
     /* ---------- Langue ---------- */
     STR_LANG_FR, STR_LANG_EN, STR_LANG_BTN,
 
