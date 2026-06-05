@@ -87,19 +87,37 @@ static int read_int_file(const char *p) {
     int v = 0; fscanf(f, "%d", &v); fclose(f); return v;
 }
 
-/* Le carrier du gadget g_ether reste a 1 meme cable debranche.
- * Indicateur fiable : un client a-t-il un bail DHCP actif sur usb0, ou un
- * voisin ARP sur l'interface ? */
+/* Le carrier du gadget (et l'etat UDC) reste a "configured/1" meme cable
+ * debranche : le Pi Zero n'a pas de detection VBUS, on ne peut pas s'y fier.
+ * Indicateur fiable = un client est-il REELLEMENT present :
+ *   1) un bail DHCP NON EXPIRE sur usb0, ou
+ *   2) un voisin ARP dans un etat VIVANT (pas STALE/FAILED : ceux-ci
+ *      persistent longtemps apres debranchement et donnaient un faux positif). */
 static bool usb_client_connected(void) {
+    char line[256];
+    time_t now = time(NULL);
+
+    /* 1) bail DHCP : 1er champ = epoch d'expiration ; ignore si deja expire. */
     FILE *f = fopen("/var/lib/NetworkManager/dnsmasq-usb0.leases", "r");
     if (f) {
-        int c = fgetc(f); fclose(f);
-        if (c != EOF) return true;
+        while (fgets(line, sizeof(line), f)) {
+            long exp = strtol(line, NULL, 10);
+            if (exp > (long)now) { fclose(f); return true; }
+        }
+        fclose(f);
     }
+
+    /* 2) voisin ARP dans un etat actif uniquement. */
     FILE *p = popen("ip neigh show dev usb0 2>/dev/null", "r");
     if (p) {
-        int c = fgetc(p); pclose(p);
-        if (c != EOF) return true;
+        while (fgets(line, sizeof(line), p)) {
+            if (strstr(line, "REACHABLE") || strstr(line, "DELAY") ||
+                strstr(line, "PROBE")     || strstr(line, "PERMANENT")) {
+                pclose(p);
+                return true;
+            }
+        }
+        pclose(p);
     }
     return false;
 }
