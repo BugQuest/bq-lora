@@ -6,7 +6,7 @@
 #include <linux/input.h>
 
 #define EVDEV    "/dev/input/event0"
-#define CAL_FILE "/home/bq-lora/meshui/touch.cal"
+#define CAL_FILE "/home/bq-lora/bq-lora-ui/touch.cal"
 #define SCR_W 320
 #define SCR_H 480
 

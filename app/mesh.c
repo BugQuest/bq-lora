@@ -97,7 +97,7 @@ static bool        s_dirty;
 static time_t      s_reload_at;        /* != 0 : re-demander la config à cette date */
 
 /* Persistance de la liste des nœuds (trace locale, survit aux redémarrages). */
-#define NODES_DB_PATH       "/home/bq-lora/meshui/nodes.db"
+#define NODES_DB_PATH       "/home/bq-lora/bq-lora-ui/nodes.db"
 #define NODES_SAVE_MIN_SECS 30         /* throttle écriture (ménage la carte SD) */
 static bool        s_nodes_save_pending;
 static time_t      s_nodes_last_save;
@@ -186,7 +186,7 @@ static void mesh_nodes_save(void)
     snprintf(tmp, sizeof(tmp), "%s.tmp", NODES_DB_PATH);
     FILE *f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "# meshui nodes v1: num\\tid\\tfirst\\tlast\\tbest_snr\\tname\n");
+    fprintf(f, "# bq-lora-ui nodes v1: num\\tid\\tfirst\\tlast\\tbest_snr\\tname\n");
     for (int i = 0; i < s_node_count; i++) {
         node_slot_t *s = &s_nodes[i];
         fprintf(f, "%u\t%s\t%u\t%u\t%d\t%s\n",

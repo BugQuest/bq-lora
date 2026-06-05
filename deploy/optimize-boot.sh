@@ -1,5 +1,5 @@
 #!/bin/bash
-# Optimisations de temps de demarrage pour le Pi Zero 2 W (cyberdeck meshui).
+# Optimisations de temps de demarrage pour le Pi Zero 2 W (cyberdeck bq-lora-ui).
 # Idempotent : rejouable sans effet de bord. A executer en root.
 set -x
 
@@ -20,14 +20,14 @@ EOF
 
 # 3) UI au plus tot : ordonnee juste apres le retroeclairage, sans attendre
 #    meshtasticd ni multi-user.target (l'UI gere deja MESH indisponible).
-mkdir -p /etc/systemd/system/meshui.service.d
-cat > /etc/systemd/system/meshui.service.d/early.conf <<'EOF'
+mkdir -p /etc/systemd/system/bq-lora-ui.service.d
+cat > /etc/systemd/system/bq-lora-ui.service.d/early.conf <<'EOF'
 [Unit]
 After=backlight.service
 Wants=backlight.service
 EOF
 
-# 4) Bluetooth a la demande : demarre quand on ouvre l'ecran BT (via meshui-ctl),
+# 4) Bluetooth a la demande : demarre quand on ouvre l'ecran BT (via bq-lora-ui-ctl),
 #    pas au boot.
 systemctl disable bluetooth.service || true
 

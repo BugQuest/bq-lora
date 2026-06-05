@@ -15,7 +15,7 @@
 #include <dirent.h>
 #include <strings.h>
 
-#define CTL "/usr/bin/sudo /usr/local/sbin/meshui-ctl"
+#define CTL "/usr/bin/sudo /usr/local/sbin/bq-lora-ui-ctl"
 
 /* ---------- helpers ---------- */
 static void chomp(char *s) { size_t n = strlen(s); if (n && s[n-1] == '\n') s[n-1] = 0; }
@@ -143,7 +143,7 @@ void sys_warn_get(sys_warn_t *o)
 /* ---------- actions ---------- */
 void sys_reboot(void)      { system(CTL " reboot &"); }
 void sys_shutdown(void)    { system(CTL " poweroff &"); }
-void sys_restart_app(void) { system(CTL " restart-meshui &"); }
+void sys_restart_app(void) { system(CTL " restart-bq-lora-ui &"); }
 
 bool sys_ssh_enabled(void)
 {
@@ -273,7 +273,7 @@ static void *bu_thread(void *a)
     bu_ctx_t *c = a;
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
-             "/usr/bin/python3 /home/bq-lora/meshui/tools/badusb.py '%s' >/dev/null 2>&1",
+             "/usr/bin/python3 /home/bq-lora/bq-lora-ui/tools/badusb.py '%s' >/dev/null 2>&1",
              c->path);
     c->ok = (system(cmd) == 0);
     lv_async_call(bu_deliver, c);
@@ -288,8 +288,8 @@ void sys_badusb_run_async(const char *path, badusb_cb_t cb, void *user)
 }
 
 /* ---------- Camera CSI (IMX219) ---------- */
-#define PHOTO_DIR   "/home/bq-lora/meshui/photos"
-#define CAM_PREVIEW "/tmp/meshui-cam.rgb565"
+#define PHOTO_DIR   "/home/bq-lora/bq-lora-ui/photos"
+#define CAM_PREVIEW "/tmp/bq-lora-ui-cam.rgb565"
 
 typedef struct {
     cam_capture_cb_t cb; void *user;
@@ -329,7 +329,7 @@ static void *cam_thread(void *a)
     bool prev = false;
     if (cap) {
         snprintf(cmd, sizeof(cmd),
-                 "/usr/bin/python3 /home/bq-lora/meshui/tools/cam.py '%s' '%s' %d %d "
+                 "/usr/bin/python3 /home/bq-lora/bq-lora-ui/tools/cam.py '%s' '%s' %d %d "
                  ">/dev/null 2>&1", c->photo, c->preview, c->w, c->h);
         prev = (system(cmd) == 0);
     }
@@ -543,7 +543,7 @@ static void *campv_thread(void *a)
     campv_ctx_t *c = a; char cmd[768];
     strncpy(c->preview, CAM_PREVIEW, sizeof(c->preview) - 1);
     snprintf(cmd, sizeof(cmd),
-             "/usr/bin/python3 /home/bq-lora/meshui/tools/cam.py '%s' '%s' %d %d "
+             "/usr/bin/python3 /home/bq-lora/bq-lora-ui/tools/cam.py '%s' '%s' %d %d "
              ">/dev/null 2>&1", c->jpg, c->preview, c->w, c->h);
     c->ok = (system(cmd) == 0);
     lv_async_call(campv_deliver, c);
@@ -748,12 +748,12 @@ void sys_beep(int freq_hz, int duration_ms)
 {
     char cmd[160];
     snprintf(cmd, sizeof(cmd),
-             "/usr/bin/python3 /home/bq-lora/meshui/tools/beep.py %d %d >/dev/null 2>&1 &",
+             "/usr/bin/python3 /home/bq-lora/bq-lora-ui/tools/beep.py %d %d >/dev/null 2>&1 &",
              freq_hz, duration_ms);
     system(cmd);
 }
 
-#define REPO "/home/bq-lora/meshui"
+#define REPO "/home/bq-lora/bq-lora-ui"
 
 typedef struct {
     update_check_cb_t cb;
@@ -795,13 +795,13 @@ static void upd_apply_deliver(void *a) { upd_apply_ctx_t *c = a; if (c->cb) c->c
 static void *upd_apply_thread(void *a)
 {
     upd_apply_ctx_t *c = a;
-    /* meshui-ctl update fait pull + build + restart (privilegies). Le restart
+    /* bq-lora-ui-ctl update fait pull + build + restart (privilegies). Le restart
      * tuera ce process avant le callback ; on signale just before. */
     c->ok = (system(CTL " update") == 0);
     lv_async_call(upd_apply_deliver, c);
     return NULL;
 }
-#define UPD_PROGRESS_FILE "/tmp/meshui-update.progress"
+#define UPD_PROGRESS_FILE "/tmp/bq-lora-ui-update.progress"
 
 void sys_update_apply_async(update_apply_cb_t cb, void *user)
 {
@@ -811,7 +811,7 @@ void sys_update_apply_async(update_apply_cb_t cb, void *user)
     pthread_t t; pthread_create(&t, NULL, upd_apply_thread, c); pthread_detach(t);
 }
 
-/* Jalon de progression ecrit par meshui-update.sh : 0..100, ou -1 si echec,
+/* Jalon de progression ecrit par bq-lora-ui-update.sh : 0..100, ou -1 si echec,
  * ou 0 si le fichier n'existe pas encore. */
 int sys_update_progress(void)
 {

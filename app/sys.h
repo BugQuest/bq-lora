@@ -31,10 +31,10 @@ typedef struct {
 } sys_warn_t;
 void sys_warn_get(sys_warn_t *out);
 
-/* Actions privilégiées — passent par /usr/local/sbin/meshui-ctl (sudo NOPASSWD). */
+/* Actions privilégiées — passent par /usr/local/sbin/bq-lora-ui-ctl (sudo NOPASSWD). */
 void sys_reboot(void);
 void sys_shutdown(void);
-void sys_restart_app(void);    /* systemctl restart meshui */
+void sys_restart_app(void);    /* systemctl restart bq-lora-ui */
 bool sys_ssh_enabled(void);
 bool sys_ssh_running(void);
 void sys_ssh_set(bool on);
@@ -70,7 +70,7 @@ void sys_usb_mode_set_async(usb_mode_t mode, usb_mode_cb_t cb, void *user);
 typedef void (*badusb_cb_t)(bool ok, void *user);
 void sys_badusb_run_async(const char *script_path, badusb_cb_t cb, void *user);
 
-/* Camera CSI (IMX219) : prend une photo (sauvegardee dans ~/meshui/photos/) et
+/* Camera CSI (IMX219) : prend une photo (sauvegardee dans ~/bq-lora-ui/photos/) et
  * en genere une preview brute RGB565 (prev_w x prev_h) pour un canvas LVGL.
  * Le callback est rappele sur le thread UI ; photo_path/preview_path pointent
  * sur des buffers valides uniquement pendant l'appel. */
@@ -92,7 +92,7 @@ void sys_cam_stream_start(uint8_t *buf, int w, int h,
 void sys_cam_stream_stop(void);
 bool sys_cam_stream_active(void);
 
-/* Galerie : remplit 'paths' (chemins absolus des .jpg de ~/meshui/photos/,
+/* Galerie : remplit 'paths' (chemins absolus des .jpg de ~/bq-lora-ui/photos/,
  * les plus recents d'abord) et retourne le nombre ecrit (au plus 'max'). */
 int  sys_cam_photo_list(char paths[][256], int max);
 /* Supprime une photo (unlink). */
@@ -145,7 +145,7 @@ typedef void (*wifi_connect_cb_t)(bool ok, const char *msg, void *user);
 void sys_wifi_connect_async(const char *ssid, const char *password,
                             wifi_connect_cb_t cb, void *user);
 
-/* WPS push-button (PBC). Lance wpa_cli wps_pbc via meshui-ctl puis surveille
+/* WPS push-button (PBC). Lance wpa_cli wps_pbc via bq-lora-ui-ctl puis surveille
  * l'apparition d'une connexion active sur wlan0 (timeout 120 s). */
 void sys_wifi_wps_async(wifi_connect_cb_t cb, void *user);
 

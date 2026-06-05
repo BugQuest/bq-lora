@@ -4,10 +4,10 @@
 LVGL). Il se crée sur le Pi à partir du template, avec les modifications ci-dessous.
 
 ```bash
-cp ~/lvgl/lv_conf_template.h ~/meshui/lv_conf.h
+cp ~/lvgl/lv_conf_template.h ~/bq-lora-ui/lv_conf.h
 ```
 
-Puis éditer `~/meshui/lv_conf.h` :
+Puis éditer `~/bq-lora-ui/lv_conf.h` :
 
 | Ligne d'origine                              | Nouvelle valeur            | Raison |
 |----------------------------------------------|----------------------------|--------|

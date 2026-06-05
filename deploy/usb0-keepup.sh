@@ -8,8 +8,8 @@
 # le Pi est deja en 10.42.1.1 avec son DHCP/NAT actif -> SSH direct, sans avoir
 # a toggler quoi que ce soit cote Windows.
 #
-# Installe par provision.sh / meshui-update vers
-#   /etc/NetworkManager/dispatcher.d/90-meshui-usb0
+# Installe par provision.sh / bq-lora-ui-update vers
+#   /etc/NetworkManager/dispatcher.d/90-bq-lora-ui-usb0
 # (doit etre root:root, 755, non inscriptible par group/other, sinon NM l'ignore)
 IFACE="$1"
 ACTION="$2"

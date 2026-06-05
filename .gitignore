@@ -7,7 +7,7 @@ build/
 *.o
 *.so
 *.a
-meshui
+bq-lora-ui
 
 # lv_conf.h généré depuis le template (voir docs/lv_conf.md)
 # (root = généré par provision, app/ = symlink vers celui-ci)

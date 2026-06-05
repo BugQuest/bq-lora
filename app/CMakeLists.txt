@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(meshui C)
+project(bq-lora-ui C)
 
 set(CMAKE_C_STANDARD 11)
 
@@ -11,7 +11,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_subdirectory(lvgl)
 
 file(GLOB APP_SRC ${CMAKE_CURRENT_SOURCE_DIR}/*.c)
-add_executable(meshui ${APP_SRC})
+add_executable(bq-lora-ui ${APP_SRC})
 # libzbar (apt: libzbar0 libzbar-dev) : décodage QR pour la conf WiFi.
 find_library(ZBAR_LIB zbar REQUIRED)
-target_link_libraries(meshui lvgl m pthread ${ZBAR_LIB})
+target_link_libraries(bq-lora-ui lvgl m pthread ${ZBAR_LIB})

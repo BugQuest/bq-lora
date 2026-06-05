@@ -2,12 +2,12 @@
 Description=Init PWM retroeclairage (GPIO18)
 DefaultDependencies=no
 After=local-fs.target systemd-modules-load.service
-Before=meshui-splash.service meshui.service
+Before=bq-lora-ui-splash.service bq-lora-ui.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/sbin/meshui-backlight-init
+ExecStart=/usr/local/sbin/bq-lora-ui-backlight-init
 
 [Install]
 WantedBy=sysinit.target

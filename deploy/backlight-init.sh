@@ -1,6 +1,6 @@
 #!/bin/sh
 # Initialise la PWM materielle sur GPIO18 pour piloter le retroeclairage.
-# Idempotent. Lance par backlight.service au boot, avant fbtft/meshui.
+# Idempotent. Lance par backlight.service au boot, avant fbtft/bq-lora-ui.
 set -e
 
 CHIP=/sys/class/pwm/pwmchip0

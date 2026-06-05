@@ -1,7 +1,7 @@
 #pragma once
 #include <stdbool.h>
 
-/* Valeurs runtime, lues/écrites dans /home/bq-lora/meshui/config.ini.
+/* Valeurs runtime, lues/écrites dans /home/bq-lora/bq-lora-ui/config.ini.
  * Defaults appliques si fichier absent (premiere execution). */
 
 void  settings_load(void);

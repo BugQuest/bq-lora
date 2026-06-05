@@ -1,0 +1,3 @@
+# sudoers fragment pour bq-lora-ui : NOPASSWD limité strictement au helper.
+# Installer dans /etc/sudoers.d/bq-lora-ui (mode 0440, owner root:root).
+bq-lora ALL=(root) NOPASSWD: /usr/local/sbin/bq-lora-ui-ctl

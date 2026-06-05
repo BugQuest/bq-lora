@@ -40,7 +40,7 @@ au doigt sur l'écran, sans CLI ni application tierce.
 - **Réglages** — nom du nœud, SSID/passphrase du hotspot, fuseau horaire,
   activation du mesh — sans recompiler.
 - **Bilingue FR / EN** — interface complète dans les deux langues, bascule en un
-  tap depuis la vue SYSTÈME, **persistante** (`/home/bq-lora/meshui/config.ini`).
+  tap depuis la vue SYSTÈME, **persistante** (`/home/bq-lora/bq-lora-ui/config.ini`).
 - **Mise à jour OTA** — `git pull` + rebuild + redémarrage depuis l'UI, avec barre
   de progression.
 
@@ -116,7 +116,7 @@ DHCP + NAT). Le PC obtient un bail automatiquement et `ssh bq-lora@10.42.1.1`
 fonctionne dès le boot, indépendamment du WiFi.
 
 `usb0` est forcé actif au démarrage (`usb-net-up.service` + dispatcher NM
-`90-meshui-usb0` + `ignore-carrier`) pour éviter le *deadlock* de carrier qui
+`90-bq-lora-ui-usb0` + `ignore-carrier`) pour éviter le *deadlock* de carrier qui
 laisserait Windows voir « câble réseau débranché ». Le sous-réseau 10.42.1.0/24 est
 distinct de celui du hotspot WiFi (10.42.0.0/24) pour permettre la coexistence des
 deux. Alimenter le Pi par le port `PWR IN` en parallèle évite tout manque de courant.
@@ -277,7 +277,7 @@ Côté UI :
   64 → frame compacte, sans *padding* de stride). La caméra étant mono-accès, le flux
   est démarré à l'ouverture de la page et arrêté proprement au changement d'onglet.
 - **Capture HD** — le bouton CAPTURE coupe brièvement le flux, prend une photo en
-  pleine résolution via `rpicam-still` (enregistrée dans `~/meshui/photos/`), puis le
+  pleine résolution via `rpicam-still` (enregistrée dans `~/bq-lora-ui/photos/`), puis le
   live reprend.
 - **Galerie** — parcours des photos (navigation cyclique, suppression confirmée) ;
   chaque vignette est convertie en RGB565 par [`tools/cam.py`](tools/cam.py) (JPEG →
@@ -290,7 +290,7 @@ Côté UI :
   contrôles dédiée remplace temporairement la nav précédent/suivant : ⊖ / × / ⊕
   / ↻ (fit) / ✕ (quitter le mode nav).
 
-> Le dossier `~/meshui/photos/` est un répertoire **runtime** (jamais versionné).
+> Le dossier `~/bq-lora-ui/photos/` est un répertoire **runtime** (jamais versionné).
 > Si l'image reste noire, vérifier d'abord la **nappe CSI** (un défaut de contact
 > donne `-EREMOTEIO` côté i2c : capteur non détecté malgré le bon driver).
 
@@ -311,7 +311,7 @@ sudo apt install -y build-essential cmake git rpicam-apps python3-pil \
 > - `libzbar0` / `libzbar-dev` fournissent le décodeur de QR-codes utilisé par le
 >   **scanner WiFi-QR** (lien C `-lzbar` dans `app/CMakeLists.txt`).
 > - `wpasupplicant` (déjà présent quand NetworkManager pilote le WiFi) expose le
->   socket `/run/wpa_supplicant/wlan0` que `meshui-ctl wifi-wps` utilise pour
+>   socket `/run/wpa_supplicant/wlan0` que `bq-lora-ui-ctl wifi-wps` utilise pour
 >   déclencher un **push-button WPS** — NetworkManager ne sachant plus le faire
 >   nativement depuis ~2017.
 >
@@ -339,7 +339,7 @@ documentées dans [`docs/lv_conf.md`](docs/lv_conf.md).
 ```bash
 cd app
 cmake -B build && cmake --build build -j2
-sudo ./build/meshui
+sudo ./build/bq-lora-ui
 ```
 
 > Le premier build sur Pi Zero 2 W prend quelques minutes (compilation de LVGL).
@@ -354,7 +354,7 @@ sudo ./build/meshui
 meshtastic-screen/
 ├── README.md
 ├── .gitignore
-├── app/                       # appli LVGL en C (compilée en ~/meshui/build/meshui)
+├── app/                       # appli LVGL en C (compilée en ~/bq-lora-ui/build/bq-lora-ui)
 │   ├── CMakeLists.txt         # GLOB sur *.c
 │   ├── main.c                 # tick + display fbdev + touch + ui_init
 │   ├── ui.c / ui.h            # toute l'UI : hub, chat, nodes, sys, badusb, bt, modales
@@ -373,16 +373,16 @@ meshtastic-screen/
 │   └── lora.yaml              # config meshtasticd SX1262 (-> /etc/meshtasticd/config.d/)
 ├── deploy/                    # à installer sur le Pi
 │   ├── provision.sh           # premier-boot : build + services + radio + sudoers
-│   ├── meshui-update.sh       # mise à jour OTA : git reset + rebuild + réinstall + restart
+│   ├── bq-lora-ui-update.sh       # mise à jour OTA : git reset + rebuild + réinstall + restart
 │   ├── optimize-boot.sh       # optimisations du temps de boot (désactive cloud-init)
-│   ├── meshui.service         # autostart de l'app
-│   ├── meshui-splash.service  # boot splash + détache la console
-│   ├── meshui-shutdown.service# splash d'arrêt/redémarrage
+│   ├── bq-lora-ui.service         # autostart de l'app
+│   ├── bq-lora-ui-splash.service  # boot splash + détache la console
+│   ├── bq-lora-ui-shutdown.service# splash d'arrêt/redémarrage
 │   ├── shutdown-splash.sh      # rendu du splash d'arrêt (après libération de fb0)
-│   ├── meshui-btserial.service# console série Bluetooth (SPP/RFCOMM)
+│   ├── bq-lora-ui-btserial.service# console série Bluetooth (SPP/RFCOMM)
 │   ├── bluetooth-compat.conf  # bluetoothd --compat (requis pour sdptool/SPP)
-│   ├── meshui-ctl             # helper privilégié (NOPASSWD limité)
-│   ├── meshui-sudoers         # règle sudoers correspondante
+│   ├── bq-lora-ui-ctl             # helper privilégié (NOPASSWD limité)
+│   ├── bq-lora-ui-sudoers         # règle sudoers correspondante
 │   ├── backlight-init.sh      # PWM GPIO18 init
 │   ├── backlight.service      # systemd oneshot pour le PWM
 │   ├── usb-gadget.service     # systemd pour le gadget USB (au boot)
@@ -440,7 +440,7 @@ meshtastic-screen/
       RSSI, batterie, sauts, **« vu il y a X »** ; **tri commutable** RÉCENT / SNR via
       un bouton dédié ; **mise à jour incrémentale** (cache par node `num` +
       `lv_obj_move_to_index` → pas de saut de scroll, le label « vu il y a X »
-      défile en direct) ; **persistance locale** dans `~/meshui/nodes.db` (atomique
+      défile en direct) ; **persistance locale** dans `~/bq-lora-ui/nodes.db` (atomique
       tmp+rename, throttle 30 s) — `first_heard` / `last_heard` / `best_snr` /
       `name` survivent aux reboots ; `MAX_NODES = 200`
 - [x] **WIFI** : SSID/signal + modal scan + connexion avec saisie passphrase ;
@@ -452,7 +452,7 @@ meshtastic-screen/
 - [x] **HOTSPOT** : état + toggle + QR code WiFi pour scan téléphone
 - [x] **BAD USB** : explorateur de scripts, bascule HID/STORAGE, exécution *DuckyScript*
 - [x] **CAMERA** : viseur live (`rpicam-vid` YUV420 → RGB565 dans un canvas), bouton
-      CAPTURE (photo pleine résolution `rpicam-still` → `~/meshui/photos/`), accès galerie
+      CAPTURE (photo pleine résolution `rpicam-still` → `~/bq-lora-ui/photos/`), accès galerie
 - [x] **GALERIE** : consultation des photos (canvas RGB565 via `tools/cam.py`),
       navigation précédent/suivant cyclique, suppression confirmée, **mode navigation
       zoom + pan** (preview HD 768×576, `transform_scale` LVGL + drag tactile)
@@ -460,7 +460,7 @@ meshtastic-screen/
       RÉGLAGES) pour rester fluide malgré le bottleneck SPI de l'ILI9486 (chaque
       sous-onglet tient quasi dans la hauteur visible) :
   - **SYSTÈME** : INFO (hostname, IPs wlan/usb, uptime, CPU temp, RAM, disque, alim,
-    kernel) · ALIMENTATION (Éteindre / Redémarrer) · APPLICATION (Relancer meshui) ·
+    kernel) · ALIMENTATION (Éteindre / Redémarrer) · APPLICATION (Relancer bq-lora-ui) ·
     MISE À JOUR (vérifier + installer l'OTA) · **LANGUE** (bascule FR ⇄ EN)
   - **RÉSEAU** : SSH (état + ACTIVER/DESACTIVER) · BLUETOOTH (état + toggle) ·
     USB (état + IP Pi + bascule partage / client ICS)
@@ -529,19 +529,19 @@ identique au format de l'application Meshtastic officielle.
 ### Sécurité
 
 - [x] SSH par clé publique uniquement
-- [x] Helper privilégié `meshui-ctl` + sudoers NOPASSWD strictement limité à ce binaire
+- [x] Helper privilégié `bq-lora-ui-ctl` + sudoers NOPASSWD strictement limité à ce binaire
 
 ### Déploiement
 
 - [x] Workflow flash : Imager pour l'OS + cloud-init `user-data` + bundle tarball
 - [x] `provision.sh` idempotent (apt + LVGL clone + lv_conf généré + build + services + radio)
-- [x] Mise à jour OTA via `meshui-update.sh` (déclenchable depuis l'UI)
+- [x] Mise à jour OTA via `bq-lora-ui-update.sh` (déclenchable depuis l'UI)
 - [x] 3 voies d'accès SSH : WiFi Freebox, hotspot 10.42.0.1, gadget USB 10.42.1.1 (sous-réseaux distincts → coexistence hotspot + USB)
 
 ### Pistes d'évolution
 
 - [ ] **Carte locale hors-ligne** des nœuds — tuiles raster pré-converties en
-      RGB565 sur la SD (`/home/bq-lora/meshui/map/{z}/{x}/{y}.rgb565`, schéma
+      RGB565 sur la SD (`/home/bq-lora/bq-lora-ui/map/{z}/{x}/{y}.rgb565`, schéma
       Slippy / Leaflet), tracé des nœuds depuis leur Position protobuf (lat/lon
       `latitude_i` / `longitude_i` × 1e-7) ; tuilage généré hors-ligne par
       `tools/prep_map.py` à partir d'un mbtiles OSM + bbox. Réutilise le pattern

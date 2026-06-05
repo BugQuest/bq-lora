@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CONFIG_PATH "/home/bq-lora/meshui/config.ini"
+#define CONFIG_PATH "/home/bq-lora/bq-lora-ui/config.ini"
 
 /* Valeurs courantes (initialisees aux defauts, ecrasees par config.ini). */
 static char s_node[64]    = "NODE-7F3A";
@@ -55,7 +55,7 @@ void settings_save(void)
 {
     FILE *f = fopen(CONFIG_PATH, "w");
     if (!f) return;
-    fprintf(f, "# meshui config (genere par l'UI)\n");
+    fprintf(f, "# bq-lora-ui config (genere par l'UI)\n");
     fprintf(f, "node_name=%s\n",    s_node);
     fprintf(f, "hotspot_ssid=%s\n", s_ssid);
     fprintf(f, "hotspot_pass=%s\n", s_pass);

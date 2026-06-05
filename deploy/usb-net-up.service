@@ -9,7 +9,7 @@ Requires=usb-gadget.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/sbin/meshui-usb-net-up
+ExecStart=/usr/local/sbin/bq-lora-ui-usb-net-up
 
 [Install]
 WantedBy=multi-user.target

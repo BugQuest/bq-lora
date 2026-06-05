@@ -6,7 +6,7 @@ Description=Meshtastic command screen (LVGL UI)
 [Service]
 Type=simple
 User=bq-lora
-WorkingDirectory=/home/bq-lora/meshui
+WorkingDirectory=/home/bq-lora/bq-lora-ui
 
 # Detache la console framebuffer (vtcon1) -> ecran 100% propre, sans texte ni curseur.
 # Le prefixe "+" force l'execution en root meme si le service tourne en bq-lora.
@@ -14,7 +14,7 @@ ExecStartPre=+/bin/sh -c 'echo 0 > /sys/class/vtconsole/vtcon1/bind || true'
 # Attend que le framebuffer SPI soit pret.
 ExecStartPre=/bin/sh -c 'until [ -e /dev/fb0 ]; do sleep 0.2; done'
 
-ExecStart=/home/bq-lora/meshui/build/meshui
+ExecStart=/home/bq-lora/bq-lora-ui/build/bq-lora-ui
 
 Restart=on-failure
 RestartSec=2

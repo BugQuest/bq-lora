@@ -1,5 +1,5 @@
 [Unit]
-Description=Console serie Bluetooth (RFCOMM SPP) pour meshui
+Description=Console serie Bluetooth (RFCOMM SPP) pour bq-lora-ui
 After=bluetooth.service
 Requires=bluetooth.service
 

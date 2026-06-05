@@ -1,9 +1,9 @@
 #!/bin/sh
 # Affiche un splash sur l'ecran SPI pendant l'arret/redemarrage.
-# Appele par l'ExecStop de meshui-shutdown.service, donc APRES que meshui
+# Appele par l'ExecStop de bq-lora-ui-shutdown.service, donc APRES que bq-lora-ui
 # ait libere /dev/fb0. Detecte s'il s'agit d'un reboot ou d'un arret.
 PY=/usr/bin/python3
-SPLASH=/home/bq-lora/meshui/tools/splash.py
+SPLASH=/home/bq-lora/bq-lora-ui/tools/splash.py
 
 # Empeche la console kernel (fbcon) de redessiner par-dessus le splash.
 echo 0 > /sys/class/vtconsole/vtcon1/bind 2>/dev/null || true
@@ -18,6 +18,6 @@ if systemctl list-jobs 2>/dev/null | grep -q 'reboot.target'; then
 else
     MODE=poweroff; STATUS="[ arret en cours... ]"; ACCENT=magenta
 fi
-echo "$(date '+%Y-%m-%d %H:%M:%S') splash $MODE" >> /var/log/meshui-shutdown.log 2>/dev/null || true
+echo "$(date '+%Y-%m-%d %H:%M:%S') splash $MODE" >> /var/log/bq-lora-ui-shutdown.log 2>/dev/null || true
 
 exec "$PY" "$SPLASH" --status "$STATUS" --accent "$ACCENT"

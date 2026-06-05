@@ -1,3 +1,0 @@
-# sudoers fragment pour meshui : NOPASSWD limité strictement au helper.
-# Installer dans /etc/sudoers.d/meshui (mode 0440, owner root:root).
-bq-lora ALL=(root) NOPASSWD: /usr/local/sbin/meshui-ctl

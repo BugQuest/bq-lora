@@ -876,7 +876,7 @@ static void upd_overlay_close(void) {
     upd_bar = upd_pct = NULL;
 }
 
-/* En cas de succès, meshui redémarre et tue ce process avant ce callback.
+/* En cas de succès, bq-lora-ui redémarre et tue ce process avant ce callback.
  * On n'arrive ici qu'en cas d'échec (pas d'internet, build cassé, ...). */
 static void upd_apply_done_cb(bool ok, void *u) {
     (void)u;
@@ -947,7 +947,7 @@ static void upd_apply_cb(lv_event_t *e) {
 }
 
 /* ----- BAD USB ----- */
-#define BADUSB_DIR "/home/bq-lora/meshui/badusb"
+#define BADUSB_DIR "/home/bq-lora/bq-lora-ui/badusb"
 static lv_obj_t *bad_run_ov, *bad_run_skull, *bad_run_status;
 static lv_timer_t *bad_run_timer;
 static int bad_run_frame;
@@ -3309,7 +3309,7 @@ static void build_camera(void) {
 }
 
 /* ---------------------------------------------------------------- app GALERIE */
-/* Parcours des photos de ~/meshui/photos/. Chaque photo selectionnee est
+/* Parcours des photos de ~/bq-lora-ui/photos/. Chaque photo selectionnee est
  * convertie en preview RGB565 (cam.py) puis affichee dans un canvas, comme la
  * capture. Navigation precedent/suivant (cyclique) + suppression confirmee. */
 #define GAL_MAX 128

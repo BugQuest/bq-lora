@@ -1,12 +1,12 @@
 #!/bin/bash
-# (Re)monte un gadget USB Mass Storage : expose ~/meshui/badusb.img au PC
+# (Re)monte un gadget USB Mass Storage : expose ~/bq-lora-ui/badusb.img au PC
 # pour qu'il apparaisse comme cle USB et permette de deposer des scripts BadUSB.
 set -e
 
 NAME=bqlora
 GADGET=/sys/kernel/config/usb_gadget/$NAME
-IMG=/home/bq-lora/meshui/badusb.img
-MNT=/home/bq-lora/meshui/badusb
+IMG=/home/bq-lora/bq-lora-ui/badusb.img
+MNT=/home/bq-lora/bq-lora-ui/badusb
 
 modprobe libcomposite
 mount -t configfs none /sys/kernel/config 2>/dev/null || true

@@ -1,14 +1,14 @@
 #!/bin/bash
 # Provisionnement premier démarrage : LVGL, lv_conf.h, build, services.
 # Appelé par cloud-init (runcmd) après installation des paquets et extraction
-# du bundle dans /home/bq-lora/meshui. Idempotent.
+# du bundle dans /home/bq-lora/bq-lora-ui. Idempotent.
 set -euo pipefail
 
 U=bq-lora
 H=/home/$U
-SRC=$H/meshui
+SRC=$H/bq-lora-ui
 
-exec >>/var/log/meshui-provision.log 2>&1
+exec >>/var/log/bq-lora-ui-provision.log 2>&1
 echo "=== provision $(date) ==="
 
 # Dépendances (filet : cloud-init peut planter sur des 404 de mirroir)
@@ -40,15 +40,15 @@ ln -sfn "$SRC/lv_conf.h" "$SRC/app/lv_conf.h"
 
 chown -R "$U:$U" "$H"
 
-# Build (source = app/, sortie = build/ ; le service lance build/meshui)
+# Build (source = app/, sortie = build/ ; le service lance build/bq-lora-ui)
 sudo -u "$U" cmake -S "$SRC/app" -B "$SRC/build"
-sudo -u "$U" cmake --build "$SRC/build" --target meshui -j2
+sudo -u "$U" cmake --build "$SRC/build" --target bq-lora-ui -j2
 
 # Helper privilégié + sudoers NOPASSWD limités (pour les contrôles dans l'UI)
-install -m 755 "$SRC/deploy/meshui-ctl"      /usr/local/sbin/meshui-ctl
-install -m 755 "$SRC/deploy/meshui-update.sh" /usr/local/sbin/meshui-update
-install -m 440 -o root -g root "$SRC/deploy/meshui-sudoers" /etc/sudoers.d/meshui
-visudo -c -f /etc/sudoers.d/meshui
+install -m 755 "$SRC/deploy/bq-lora-ui-ctl"      /usr/local/sbin/bq-lora-ui-ctl
+install -m 755 "$SRC/deploy/bq-lora-ui-update.sh" /usr/local/sbin/bq-lora-ui-update
+install -m 440 -o root -g root "$SRC/deploy/bq-lora-ui-sudoers" /etc/sudoers.d/bq-lora-ui
+visudo -c -f /etc/sudoers.d/bq-lora-ui
 
 # Init le repo git pour les mises a jour OTA depuis l'UI
 cd "$SRC"
@@ -60,21 +60,21 @@ if [ ! -d .git ]; then
 fi
 
 # Backlight PWM (rétroéclairage écran)
-install -m 755 "$SRC/deploy/backlight-init.sh"   /usr/local/sbin/meshui-backlight-init
+install -m 755 "$SRC/deploy/backlight-init.sh"   /usr/local/sbin/bq-lora-ui-backlight-init
 install -m 644 "$SRC/deploy/backlight.service"   /etc/systemd/system/backlight.service
 systemctl enable backlight.service || true
 systemctl start  backlight.service || true
 
 # Gadget USB CDC NCM (compatible Windows 11) via configfs au boot
-install -m 755 "$SRC/deploy/usb-ncm-setup.sh"     /usr/local/sbin/meshui-usb-gadget
-install -m 755 "$SRC/deploy/usb-hid-setup.sh"     /usr/local/sbin/meshui-usb-hid
-install -m 755 "$SRC/deploy/usb-storage-setup.sh" /usr/local/sbin/meshui-usb-storage
+install -m 755 "$SRC/deploy/usb-ncm-setup.sh"     /usr/local/sbin/bq-lora-ui-usb-gadget
+install -m 755 "$SRC/deploy/usb-hid-setup.sh"     /usr/local/sbin/bq-lora-ui-usb-hid
+install -m 755 "$SRC/deploy/usb-storage-setup.sh" /usr/local/sbin/bq-lora-ui-usb-storage
 install -m 644 "$SRC/deploy/usb-gadget.service"   /etc/systemd/system/usb-gadget.service
 
 # Image FAT pour le mode STORAGE (depot de scripts BadUSB depuis le PC)
-IMG="$H/meshui/badusb.img"
-MNT="$H/meshui/badusb"
-TMP="/tmp/meshui-badusb-seed"
+IMG="$H/bq-lora-ui/badusb.img"
+MNT="$H/bq-lora-ui/badusb"
+TMP="/tmp/bq-lora-ui-badusb-seed"
 mkdir -p "$TMP"
 if [ -d "$MNT" ] && ! mountpoint -q "$MNT"; then
     cp -r "$MNT"/* "$TMP/" 2>/dev/null || true
@@ -117,10 +117,10 @@ nmcli connection up usb0 2>/dev/null || true
 # que le Pi soit toujours pret a servir le DHCP/NAT au prochain branchement PC.
 install -d /etc/NetworkManager/dispatcher.d
 install -m 755 -o root -g root "$SRC/deploy/usb0-keepup.sh" \
-    /etc/NetworkManager/dispatcher.d/90-meshui-usb0
+    /etc/NetworkManager/dispatcher.d/90-bq-lora-ui-usb0
 # Service qui force l'activation de usb0 apres NM (NM ne l'auto-active pas faute
 # de carrier au boot -> sinon le PC voit "cable debranche").
-install -m 755 "$SRC/deploy/usb-net-up.sh"   /usr/local/sbin/meshui-usb-net-up
+install -m 755 "$SRC/deploy/usb-net-up.sh"   /usr/local/sbin/bq-lora-ui-usb-net-up
 install -m 644 "$SRC/deploy/usb-net-up.service" /etc/systemd/system/usb-net-up.service
 systemctl daemon-reload
 systemctl enable usb-net-up.service || true
@@ -181,20 +181,20 @@ sudo -u "$U" "$H/.local/bin/meshtastic" --host 127.0.0.1 --set lora.region EU_86
 apt-get install -y bluez
 install -d /etc/systemd/system/bluetooth.service.d
 install -m 644 "$SRC/deploy/bluetooth-compat.conf" /etc/systemd/system/bluetooth.service.d/bluetooth-compat.conf
-install -m 644 "$SRC/deploy/meshui-btserial.service" /etc/systemd/system/meshui-btserial.service
+install -m 644 "$SRC/deploy/bq-lora-ui-btserial.service" /etc/systemd/system/bq-lora-ui-btserial.service
 systemctl daemon-reload
 systemctl restart bluetooth.service || true
 
 # Services systemd
-install -m 644 "$SRC/deploy/meshui.service" /etc/systemd/system/meshui.service
-install -m 644 "$SRC/deploy/meshui-splash.service" /etc/systemd/system/meshui-splash.service
-# Splash d'arret/redemarrage (ExecStop dessine apres que meshui libere fb0)
-install -m 755 "$SRC/deploy/shutdown-splash.sh" /usr/local/sbin/meshui-shutdown-splash
-install -m 644 "$SRC/deploy/meshui-shutdown.service" /etc/systemd/system/meshui-shutdown.service
+install -m 644 "$SRC/deploy/bq-lora-ui.service" /etc/systemd/system/bq-lora-ui.service
+install -m 644 "$SRC/deploy/bq-lora-ui-splash.service" /etc/systemd/system/bq-lora-ui-splash.service
+# Splash d'arret/redemarrage (ExecStop dessine apres que bq-lora-ui libere fb0)
+install -m 755 "$SRC/deploy/shutdown-splash.sh" /usr/local/sbin/bq-lora-ui-shutdown-splash
+install -m 644 "$SRC/deploy/bq-lora-ui-shutdown.service" /etc/systemd/system/bq-lora-ui-shutdown.service
 systemctl daemon-reload
-systemctl enable meshui-splash.service meshui.service meshui-shutdown.service
-systemctl start meshui-splash.service meshui.service || true
-systemctl start meshui-shutdown.service || true
+systemctl enable bq-lora-ui-splash.service bq-lora-ui.service bq-lora-ui-shutdown.service
+systemctl start bq-lora-ui-splash.service bq-lora-ui.service || true
+systemctl start bq-lora-ui-shutdown.service || true
 
 # Optimisations du temps de demarrage (idempotent). DOIT rester en dernier :
 # desactive cloud-init pour les boots suivants une fois le provisioning fini.

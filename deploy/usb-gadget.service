@@ -6,7 +6,7 @@ Before=NetworkManager.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/sbin/meshui-usb-gadget
+ExecStart=/usr/local/sbin/bq-lora-ui-usb-gadget
 
 [Install]
 WantedBy=multi-user.target

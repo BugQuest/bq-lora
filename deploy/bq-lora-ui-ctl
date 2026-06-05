@@ -1,6 +1,6 @@
 #!/bin/sh
-# Helper privilegie pour meshui : seules ces operations sont autorisees via
-# sudo NOPASSWD (cf. /etc/sudoers.d/meshui). Garder cette surface reduite.
+# Helper privilegie pour bq-lora-ui : seules ces operations sont autorisees via
+# sudo NOPASSWD (cf. /etc/sudoers.d/bq-lora-ui). Garder cette surface reduite.
 set -e
 case "$1" in
     reboot)
@@ -17,8 +17,8 @@ case "$1" in
         systemctl stop ssh
         systemctl disable ssh
         ;;
-    restart-meshui)
-        exec systemctl restart meshui
+    restart-bq-lora-ui)
+        exec systemctl restart bq-lora-ui
         ;;
     hotspot-on)
         SSID="${2:-BugQuest-Lora}"
@@ -47,7 +47,7 @@ case "$1" in
         systemctl start bluetooth.service 2>/dev/null || true
         ;;
     bt-off)
-        systemctl stop meshui-btserial 2>/dev/null || true
+        systemctl stop bq-lora-ui-btserial 2>/dev/null || true
         exec /usr/sbin/rfkill block bluetooth
         ;;
     bt-scan)
@@ -119,26 +119,26 @@ discoverable-timeout 0
 discoverable on
 pairable on
 EOF
-        systemctl start meshui-btserial
+        systemctl start bq-lora-ui-btserial
         ;;
     bt-serial-off)
-        systemctl stop meshui-btserial 2>/dev/null || true
+        systemctl stop bq-lora-ui-btserial 2>/dev/null || true
         printf 'discoverable off\nquit\n' | /usr/bin/bluetoothctl >/dev/null 2>&1 || true
         ;;
     bt-serial-status)
-        systemctl is-active meshui-btserial 2>/dev/null || echo inactive
+        systemctl is-active bq-lora-ui-btserial 2>/dev/null || echo inactive
         ;;
     usb-hid)
-        exec /usr/local/sbin/meshui-usb-hid
+        exec /usr/local/sbin/bq-lora-ui-usb-hid
         ;;
     usb-ncm)
-        exec /usr/local/sbin/meshui-usb-gadget
+        exec /usr/local/sbin/bq-lora-ui-usb-gadget
         ;;
     usb-storage)
-        exec /usr/local/sbin/meshui-usb-storage
+        exec /usr/local/sbin/bq-lora-ui-usb-storage
         ;;
     update)
-        exec /usr/local/sbin/meshui-update
+        exec /usr/local/sbin/bq-lora-ui-update
         ;;
     usb-net-share)
         # Pi = serveur DHCP/passerelle sur usb0 (10.42.1.1).

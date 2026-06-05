@@ -64,8 +64,8 @@ chgrp video /dev/hidg0 2>/dev/null || true
 chmod g+w   /dev/hidg0 2>/dev/null || true
 
 # Remonte l'image badusb sur le point de montage
-IMG=/home/bq-lora/meshui/badusb.img
-MNT=/home/bq-lora/meshui/badusb
+IMG=/home/bq-lora/bq-lora-ui/badusb.img
+MNT=/home/bq-lora/bq-lora-ui/badusb
 if [ -f "$IMG" ] && ! mountpoint -q "$MNT" 2>/dev/null; then
     mkdir -p "$MNT"
     mount -o loop,umask=000 "$IMG" "$MNT" 2>/dev/null || true

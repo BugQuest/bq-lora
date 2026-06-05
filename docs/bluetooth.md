@@ -12,13 +12,13 @@ canal RFCOMM 1)** + un `agetty` sur `/dev/rfcomm0`.
 Au choix :
 
 - **UI** : carte **BLUETOOTH** → bouton **CONSOLE** (toggle).
-- **SSH** : `sudo /usr/local/sbin/meshui-ctl bt-serial-on`
+- **SSH** : `sudo /usr/local/sbin/bq-lora-ui-ctl bt-serial-on`
 
 Ce que ça déclenche :
 
 - démarrage de `bluetooth.service` ;
 - Pi **découvrable + appairable** (nom `bq-lora`) ;
-- `meshui-btserial.service` publie le record SPP via `sdptool add --channel=1 SP`
+- `bq-lora-ui-btserial.service` publie le record SPP via `sdptool add --channel=1 SP`
   (nécessite `bluetoothd --compat`, forcé par `bluetooth-compat.conf`) puis lance
   `rfcomm watch hci0 1 /sbin/agetty rfcomm0 115200 vt100`.
 
@@ -48,7 +48,7 @@ Prompt `bq-lora login:` (c'est `agetty` sur `rfcomm0`, 115200) :
 
 ## 5. Couper la console
 
-UI → bouton **CONSOLE** (off), ou `sudo meshui-ctl bt-serial-off`. À faire dès
+UI → bouton **CONSOLE** (off), ou `sudo bq-lora-ui-ctl bt-serial-off`. À faire dès
 que terminé : arrête le getty et rend le Pi non découvrable.
 
 ## Dépannage
@@ -59,4 +59,4 @@ que terminé : arrête le getty et rend le Pi non découvrable.
   `/etc/systemd/system/bluetooth.service.d/bluetooth-compat.conf`.
 - **Pi non visible au scan** : la console n'est pas active → relancer le toggle
   ou `bt-serial-on`.
-- **État du service** : `systemctl status meshui-btserial.service`.
+- **État du service** : `systemctl status bq-lora-ui-btserial.service`.
