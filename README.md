@@ -1,7 +1,7 @@
-# meshtastic-screen
+# BugQuest // LORA
 
-**BugQuest // LORA** — nœud **Meshtastic LoRa** autonome à écran tactile, bâti
-sur un **Raspberry Pi Zero 2 W** et un écran **MKS TS35-R V2.0** (3.5" 480×320).
+Nœud **Meshtastic LoRa** autonome à écran tactile, bâti sur un **Raspberry Pi
+Zero 2 W** et un écran **MKS TS35-R V2.0** (3.5" 480×320).
 
 L'appareil est un nœud Meshtastic complet (radio **SX1262** 868 MHz pilotée par
 `meshtasticd`) doublé d'une interface de commande **C / LVGL** rendue directement
