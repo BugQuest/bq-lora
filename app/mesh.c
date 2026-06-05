@@ -553,6 +553,10 @@ static void parse_config(const uint8_t *d, size_t n)
                     s_region_code = (uint32_t)v;
                     snprintf(s_region, sizeof(s_region), "%s", region_str((uint32_t)v));
                     s_self.region = s_region;
+                } else if (lf == 8 && lw == 0 && pb_read_varint(&lr, &v)) {  /* hop_limit */
+                    s_self.hop_limit = (uint8_t)v;
+                } else if (lf == 10 && lw == 0 && pb_read_varint(&lr, &v)) { /* tx_power dBm */
+                    s_self.tx_power = (int)(int32_t)v;
                 } else {
                     pb_skip(&lr, lw);
                 }

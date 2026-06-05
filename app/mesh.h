@@ -42,6 +42,8 @@ typedef struct {
 typedef struct {
     const char *region;    /* ex "EU868" */
     const char *preset;    /* ex "LongFast" */
+    int         tx_power;  /* dBm (0 = auto/max légal de la région) */
+    uint8_t     hop_limit; /* nombre max de sauts */
     uint8_t     batt;      /* % */
     float       volt;      /* V */
     float       chan_util; /* % utilisation canal */

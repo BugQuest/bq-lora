@@ -480,6 +480,7 @@ static int        s_nrow_count;
 static lv_obj_t  *nodes_list;
 static int        nodes_sort;          /* 0 = vu récemment, 1 = meilleur SNR */
 static lv_obj_t  *nodes_sort_lbl;
+static lv_obj_t  *nodes_radio_lbl;     /* région / preset / TX / sauts */
 
 static node_row_t *node_row_find(uint32_t num) {
     for (int i = 0; i < s_nrow_count; i++)
@@ -546,6 +547,19 @@ static int node_cmp(const void *a, const void *b) {
 /* Synchronise la liste avec l'état backend (création/maj/réordonnancement). */
 static void nodes_sync(void) {
     if (!nodes_list) return;
+
+    /* ligne radio : conditionne directement la portée (région/preset/TX/sauts) */
+    if (nodes_radio_lbl) {
+        const mesh_self_t *sf = mesh_self();
+        char tx[16];
+        if (sf->tx_power > 0) snprintf(tx, sizeof(tx), "%ddBm", sf->tx_power);
+        else                  snprintf(tx, sizeof(tx), "auto");
+        char rb[96];
+        snprintf(rb, sizeof(rb), LV_SYMBOL_GPS " %s  %s  TX %s  %d sauts",
+                 sf->region, sf->preset, tx, sf->hop_limit);
+        lv_label_set_text(nodes_radio_lbl, rb);
+    }
+
     static const mesh_node_t *arr[NODE_ROW_MAX];
     int n = mesh_node_count();
     if (n > NODE_ROW_MAX) n = NODE_ROW_MAX;
@@ -574,12 +588,15 @@ static void nodes_sort_cb(lv_event_t *e) {
 static void build_nodes(void) {
     s_nrow_count = 0;        /* anciennes lignes détruites par lv_obj_clean(content) */
     nodes_list = NULL;
+    nodes_radio_lbl = NULL;
 
-    /* en-tête : bouton de bascule du tri */
+    /* en-tête : bouton de bascule du tri + résumé radio (portée) */
     lv_obj_t *hdr = lv_obj_create(content);
     lv_obj_set_size(hdr, LV_PCT(100), LV_SIZE_CONTENT);
     flat(hdr);
     lv_obj_set_style_pad_all(hdr, 5, 0);
+    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(hdr, 4, 0);
     lv_obj_t *btn = lv_button_create(hdr);
     lv_obj_set_size(btn, 150, 28);
     lv_obj_set_style_radius(btn, 2, 0);
@@ -589,6 +606,8 @@ static void build_nodes(void) {
     nodes_sort_lbl = label(btn, nodes_sort ? LV_SYMBOL_GPS " TRI: SNR" : LV_SYMBOL_GPS " TRI: RECENT",
                            FONT_SMALL, CY_CYAN);
     lv_obj_center(nodes_sort_lbl);
+
+    nodes_radio_lbl = label(hdr, "", FONT_SMALL, CY_DIM);
 
     lv_obj_t *list = lv_obj_create(content);
     lv_obj_set_width(list, LV_PCT(100));
