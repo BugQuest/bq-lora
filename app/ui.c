@@ -73,6 +73,16 @@ static lv_obj_t *label(lv_obj_t *parent, const char *txt, const lv_font_t *font,
 static lv_obj_t *tb_clock, *tb_name, *tb_back;
 /* barre d'état verticale (droite) : icônes système + LoRa */
 static lv_obj_t *sb_usb, *sb_wifi, *sb_link, *sb_nodes, *sb_util, *sb_batt;
+/* ----- Warnings (auto-cachees quand pas d'alerte) -----
+ * - throttle/sous-tension : magenta (en cours) ou ambre (deja eu)
+ * - CPU temp >= 70C : ambre, >= 80C : magenta, avec valeur en C
+ * - disque >= 85% : ambre, >= 95% : magenta, avec %
+ * - gadget USB en mode non-RESEAU : KEYBOARD (HID, magenta) ou DRIVE (storage, ambre)
+ * Le but est de voir immediatement les pepins systeme sans aller dans l'onglet. */
+static lv_obj_t *sb_warn_thr_cell, *sb_warn_thr_ic;
+static lv_obj_t *sb_warn_temp_cell, *sb_warn_temp_ic, *sb_warn_temp_val;
+static lv_obj_t *sb_warn_disk_cell, *sb_warn_disk_ic, *sb_warn_disk_val;
+static lv_obj_t *sb_warn_usbmode_cell, *sb_warn_usbmode_ic;
 static lv_timer_t *tb_timer;
 
 /* Badge non-lus sur la carte MESSAGES du hub. msg_seen = compteur "lu" (remis
@@ -177,6 +187,63 @@ static void statusbar_refresh(lv_timer_t *t) {
         lv_label_set_text(sb_batt, LV_SYMBOL_CHARGE);
         lv_obj_set_style_text_color(sb_batt, lv_color_hex(CY_DIM), 0);
     }
+
+    /* --- alertes systeme (cachees tant que tout va bien) --- */
+    sys_warn_t w; sys_warn_get(&w);
+
+    /* throttling : magenta = en cours, ambre = passe seulement, cache sinon */
+    if (sb_warn_thr_cell) {
+        if (w.throttled_now || w.throttled_ever) {
+            lv_obj_clear_flag(sb_warn_thr_cell, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_text_color(sb_warn_thr_ic,
+                lv_color_hex(w.throttled_now ? CY_MAGENTA : CY_AMBER), 0);
+        } else {
+            lv_obj_add_flag(sb_warn_thr_cell, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    /* CPU temp : seuil 70C (ambre) / 80C (magenta) */
+    if (sb_warn_temp_cell) {
+        int tc = (int)(w.cpu_temp_c + 0.5f);
+        if (tc >= 70) {
+            char tb[8]; snprintf(tb, sizeof(tb), "%dC", tc);
+            lv_label_set_text(sb_warn_temp_val, tb);
+            lv_obj_set_style_text_color(sb_warn_temp_ic,
+                lv_color_hex(tc >= 80 ? CY_MAGENTA : CY_AMBER), 0);
+            lv_obj_clear_flag(sb_warn_temp_cell, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(sb_warn_temp_cell, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    /* disque / : seuil 85% (ambre) / 95% (magenta) */
+    if (sb_warn_disk_cell) {
+        if (w.disk_used_pct >= 85) {
+            char db[8]; snprintf(db, sizeof(db), "%d%%", w.disk_used_pct);
+            lv_label_set_text(sb_warn_disk_val, db);
+            lv_obj_set_style_text_color(sb_warn_disk_ic,
+                lv_color_hex(w.disk_used_pct >= 95 ? CY_MAGENTA : CY_AMBER), 0);
+            lv_obj_clear_flag(sb_warn_disk_cell, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(sb_warn_disk_cell, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    /* gadget USB en mode HID / STORAGE : signaler la perte de SSH-USB */
+    if (sb_warn_usbmode_cell) {
+        usb_mode_t um = sys_usb_mode();
+        if (um == USB_MODE_HID) {
+            lv_label_set_text(sb_warn_usbmode_ic, LV_SYMBOL_KEYBOARD);
+            lv_obj_set_style_text_color(sb_warn_usbmode_ic, lv_color_hex(CY_MAGENTA), 0);
+            lv_obj_clear_flag(sb_warn_usbmode_cell, LV_OBJ_FLAG_HIDDEN);
+        } else if (um == USB_MODE_STORAGE) {
+            lv_label_set_text(sb_warn_usbmode_ic, LV_SYMBOL_DRIVE);
+            lv_obj_set_style_text_color(sb_warn_usbmode_ic, lv_color_hex(CY_AMBER), 0);
+            lv_obj_clear_flag(sb_warn_usbmode_cell, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(sb_warn_usbmode_cell, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 }
 
 static void build_topbar(lv_obj_t *parent) {
@@ -272,6 +339,23 @@ static void build_statusbar(lv_obj_t *parent) {
     sb_item(sb, LV_SYMBOL_LIST, "0",  CY_DIM, &sb_nodes);            /* nb nœuds (valeur) */
     sb_item(sb, LV_SYMBOL_LOOP, "0%", CY_DIM, &sb_util);             /* util canal (valeur) */
     sb_batt = sb_item(sb, LV_SYMBOL_CHARGE, NULL, CY_DIM, NULL);     /* batterie nœud (symbole) */
+
+    /* --- alertes systeme (cachees tant que tout va bien) --- */
+    sb_warn_thr_ic       = sb_item(sb, LV_SYMBOL_WARNING, NULL, CY_MAGENTA, NULL);
+    sb_warn_thr_cell     = lv_obj_get_parent(sb_warn_thr_ic);
+    lv_obj_add_flag(sb_warn_thr_cell, LV_OBJ_FLAG_HIDDEN);
+
+    sb_warn_temp_ic      = sb_item(sb, LV_SYMBOL_WARNING, "", CY_AMBER, &sb_warn_temp_val);
+    sb_warn_temp_cell    = lv_obj_get_parent(sb_warn_temp_ic);
+    lv_obj_add_flag(sb_warn_temp_cell, LV_OBJ_FLAG_HIDDEN);
+
+    sb_warn_disk_ic      = sb_item(sb, LV_SYMBOL_SD_CARD, "", CY_AMBER, &sb_warn_disk_val);
+    sb_warn_disk_cell    = lv_obj_get_parent(sb_warn_disk_ic);
+    lv_obj_add_flag(sb_warn_disk_cell, LV_OBJ_FLAG_HIDDEN);
+
+    sb_warn_usbmode_ic   = sb_item(sb, LV_SYMBOL_KEYBOARD, NULL, CY_MAGENTA, NULL);
+    sb_warn_usbmode_cell = lv_obj_get_parent(sb_warn_usbmode_ic);
+    lv_obj_add_flag(sb_warn_usbmode_cell, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* ---------------------------------------------------------------- vue CHAT */

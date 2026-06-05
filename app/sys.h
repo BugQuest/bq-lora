@@ -21,6 +21,16 @@ typedef struct {
 
 void sys_info_get(sys_info_t *out);
 
+/* Sous-ensemble "warnings" peu couteux (pas de nmcli, juste /sys + vcgencmd +
+ * df). Pollable depuis la barre d'etat verticale toutes les 1-2 s sans cout. */
+typedef struct {
+    bool  throttled_now;
+    bool  throttled_ever;
+    float cpu_temp_c;
+    int   disk_used_pct;
+} sys_warn_t;
+void sys_warn_get(sys_warn_t *out);
+
 /* Actions privilégiées — passent par /usr/local/sbin/meshui-ctl (sudo NOPASSWD). */
 void sys_reboot(void);
 void sys_shutdown(void);

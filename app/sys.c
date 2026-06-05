@@ -133,6 +133,13 @@ void sys_info_get(sys_info_t *o)
     get_wifi(o->wifi_ssid, sizeof(o->wifi_ssid), &o->wifi_signal);
 }
 
+void sys_warn_get(sys_warn_t *o)
+{
+    o->cpu_temp_c    = get_cpu_temp();
+    o->disk_used_pct = get_disk_pct();
+    get_throttled(&o->throttled_now, &o->throttled_ever);
+}
+
 /* ---------- actions ---------- */
 void sys_reboot(void)      { system(CTL " reboot &"); }
 void sys_shutdown(void)    { system(CTL " poweroff &"); }
