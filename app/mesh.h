@@ -9,14 +9,18 @@
  */
 
 typedef struct {
-    const char *id;        /* identifiant court, ex "!a1b2" */
-    const char *name;      /* nom long du nœud */
-    int8_t      snr;       /* dB */
-    int16_t     rssi;      /* dBm */
-    uint8_t     batt;      /* % */
-    uint8_t     hops;      /* sauts */
-    const char *last;      /* dernier contact, ex "2 min" */
-    bool        self;      /* true = ce nœud-ci */
+    uint32_t    num;        /* node number (clé stable, pour la maj incrémentale UI) */
+    const char *id;         /* identifiant court, ex "!a1b2" */
+    const char *name;       /* nom long du nœud */
+    int8_t      snr;        /* dB (dernier vu) */
+    int16_t     rssi;       /* dBm */
+    uint8_t     batt;       /* % */
+    uint8_t     hops;       /* sauts */
+    int8_t      best_snr;   /* meilleur SNR jamais vu (dB), -128 = inconnu */
+    uint32_t    first_heard;/* epoch du premier contact */
+    uint32_t    last_heard; /* epoch du dernier contact (tri/affichage) */
+    const char *last;       /* dernier contact relatif, ex "2m" */
+    bool        self;       /* true = ce nœud-ci */
 } mesh_node_t;
 
 typedef struct {

@@ -40,7 +40,7 @@
 #define RECONNECT_SECS   5
 #define CONNECT_TMO_SECS 8
 
-#define MAX_NODES        64
+#define MAX_NODES        200
 #define MAX_CHANS        8
 #define MAX_MSGS         128
 #define RXBUF_SZ         8192
@@ -53,6 +53,8 @@ typedef struct {
     char        name[40];
     char        last[16];
     uint32_t    last_heard; /* epoch du dernier contact */
+    uint32_t    first_heard;/* epoch du premier contact (persisté) */
+    int8_t      best_snr;   /* meilleur SNR vu, INT8_MIN = inconnu (persisté) */
 } node_slot_t;
 
 typedef struct {
@@ -93,6 +95,12 @@ static mesh_self_t s_self;
 static uint32_t    s_my_num;
 static bool        s_dirty;
 static time_t      s_reload_at;        /* != 0 : re-demander la config à cette date */
+
+/* Persistance de la liste des nœuds (trace locale, survit aux redémarrages). */
+#define NODES_DB_PATH       "/home/bq-lora/meshui/nodes.db"
+#define NODES_SAVE_MIN_SECS 30         /* throttle écriture (ménage la carte SD) */
+static bool        s_nodes_save_pending;
+static time_t      s_nodes_last_save;
 
 /* ----------------------------------------------------------------- liaison */
 static bool   s_enabled = true;        /* l'UI pilote-t-elle la liaison ? */
@@ -154,6 +162,67 @@ static const char *preset_str(uint32_t p)
     }
 }
 
+/* ----------------------------------------------------------------- persistance nodes */
+/* Découpe une ligne en colonnes séparées par TAB (in-place). La dernière
+ * colonne (nom) conserve ses espaces ; on retire le saut de ligne final. */
+static int split_tabs(char *s, char *out[], int maxf)
+{
+    int n = 0;
+    out[n++] = s;
+    for (; *s && n < maxf; s++)
+        if (*s == '\t') { *s = '\0'; out[n++] = s + 1; }
+    char *lastf = out[n - 1];
+    size_t L = strlen(lastf);
+    while (L && (lastf[L - 1] == '\n' || lastf[L - 1] == '\r')) lastf[--L] = '\0';
+    return n;
+}
+
+static node_slot_t *node_get_or_add(uint32_t num);  /* fwd */
+
+/* Écriture atomique (tmp + rename) de la trace des nœuds. */
+static void mesh_nodes_save(void)
+{
+    char tmp[256];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", NODES_DB_PATH);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f, "# meshui nodes v1: num\\tid\\tfirst\\tlast\\tbest_snr\\tname\n");
+    for (int i = 0; i < s_node_count; i++) {
+        node_slot_t *s = &s_nodes[i];
+        fprintf(f, "%u\t%s\t%u\t%u\t%d\t%s\n",
+                s->num, s->id, s->first_heard, s->last_heard,
+                (int)s->best_snr, s->name);
+    }
+    fclose(f);
+    rename(tmp, NODES_DB_PATH);
+    s_nodes_save_pending = false;
+    s_nodes_last_save = time(NULL);
+}
+
+/* Recharge la trace au démarrage : la liste est visible avant le handshake. */
+static void mesh_nodes_load(void)
+{
+    FILE *f = fopen(NODES_DB_PATH, "r");
+    if (!f) return;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        char *c[6];
+        if (split_tabs(line, c, 6) < 6) continue;
+        uint32_t num = (uint32_t)strtoul(c[0], NULL, 10);
+        if (!num) continue;
+        node_slot_t *s = node_get_or_add(num);
+        if (!s) break;
+        if (c[1][0]) snprintf(s->id, sizeof(s->id), "%s", c[1]);
+        s->first_heard = (uint32_t)strtoul(c[2], NULL, 10);
+        s->last_heard  = (uint32_t)strtoul(c[3], NULL, 10);
+        s->best_snr    = (int8_t)atoi(c[4]);
+        if (c[5][0]) snprintf(s->name, sizeof(s->name), "%s", c[5]);
+    }
+    fclose(f);
+    s_nodes_save_pending = false;     /* on vient de charger : rien à réécrire */
+}
+
 /* ----------------------------------------------------------------- nodes */
 static node_slot_t *node_get_or_add(uint32_t num)
 {
@@ -163,12 +232,24 @@ static node_slot_t *node_get_or_add(uint32_t num)
     node_slot_t *s = &s_nodes[s_node_count++];
     memset(s, 0, sizeof(*s));
     s->num = num;
+    s->first_heard = (uint32_t)time(NULL);
+    s->best_snr = INT8_MIN;          /* inconnu tant qu'aucun SNR vu */
     snprintf(s->id, sizeof(s->id), "!%08x", num);
     snprintf(s->name, sizeof(s->name), "%s", s->id);
+    s->pub.num  = num;
     s->pub.id   = s->id;
     s->pub.name = s->name;
     s->pub.last = s->last;
+    s_nodes_save_pending = true;      /* nouveau nœud -> persister */
     return s;
+}
+
+/* Enregistre un SNR : met à jour le dernier ET le record (best). */
+static void node_note_snr(node_slot_t *s, float snr)
+{
+    int8_t v = (int8_t)(snr >= 0 ? snr + 0.5f : snr - 0.5f);
+    s->pub.snr = v;
+    if (s->best_snr == INT8_MIN || v > s->best_snr) s->best_snr = v;
 }
 
 static const char *node_name(uint32_t num)
@@ -183,9 +264,10 @@ static void node_update_signal(uint32_t num, bool have_snr, float snr, int rssi)
 {
     node_slot_t *s = node_get_or_add(num);
     if (!s) return;
-    if (have_snr) s->pub.snr = (int8_t)(snr >= 0 ? snr + 0.5f : snr - 0.5f);
+    if (have_snr) node_note_snr(s, snr);
     if (rssi)     s->pub.rssi = (int16_t)rssi;
     s->last_heard = (uint32_t)time(NULL);
+    s_nodes_save_pending = true;
 }
 
 /* ----------------------------------------------------------------- channels */
@@ -328,11 +410,12 @@ static void parse_nodeinfo(const uint8_t *d, size_t n)
     node_slot_t *s = node_get_or_add(num);
     if (!s) return;
     if (user) parse_user(user, userl, s);
-    if (have_snr) s->pub.snr = (int8_t)(snr >= 0 ? snr + 0.5f : snr - 0.5f);
+    if (have_snr) node_note_snr(s, snr);
     if (have_hops) s->pub.hops = (uint8_t)hops;
     if (last_heard) s->last_heard = last_heard;
     s->pub.self = (num == s_my_num && s_my_num);
     if (dm) parse_devmetrics(dm, dml, num);
+    s_nodes_save_pending = true;
     s_dirty = true;
 }
 
@@ -686,6 +769,7 @@ void mesh_init(void)
     s_self.region = s_region;
     s_self.preset = s_preset;
     s_self.uptime = s_uptime;
+    mesh_nodes_load();           /* trace locale : nodes connus visibles de suite */
     if (s_enabled) mesh_try_connect();
 }
 
@@ -694,6 +778,10 @@ void mesh_poll(void)
     if (!s_enabled) return;          /* liaison libérée : on laisse le port à un autre client */
 
     time_t now = time(NULL);
+
+    /* Persistance throttlée de la trace des nœuds (au plus 1 écriture / 30 s). */
+    if (s_nodes_save_pending && now - s_nodes_last_save >= NODES_SAVE_MIN_SECS)
+        mesh_nodes_save();
 
     if (s_fd < 0) {
         if (now - s_last_attempt >= RECONNECT_SECS) mesh_try_connect();
@@ -756,7 +844,11 @@ const mesh_node_t *mesh_node(int i)
 {
     if (i < 0 || i >= s_node_count) return NULL;
     node_slot_t *s = &s_nodes[i];
-    s->pub.self = (s->num == s_my_num && s_my_num);
+    s->pub.self        = (s->num == s_my_num && s_my_num);
+    s->pub.num         = s->num;
+    s->pub.first_heard = s->first_heard;
+    s->pub.last_heard  = s->last_heard;
+    s->pub.best_snr    = s->best_snr;
     fmt_rel(s->last, sizeof(s->last), s->last_heard);
     return &s->pub;
 }

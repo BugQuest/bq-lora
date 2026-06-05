@@ -462,50 +462,158 @@ static void build_chat(void) {
 }
 
 /* ---------------------------------------------------------------- vue NODES */
+/* Maj incrémentale : on garde une ligne LVGL par nœud (clé = num) et on met à
+ * jour les libellés en place au lieu de tout recréer -> pas de saut de scroll.
+ * Tri commutable (vu récemment / meilleur SNR). */
+#define NODE_ROW_MAX 200
+typedef struct {
+    uint32_t  num;
+    lv_obj_t *row;
+    lv_obj_t *name_lbl;
+    lv_obj_t *right_lbl;   /* id court ou badge VOUS */
+    lv_obj_t *meta_lbl;    /* ligne SNR/RSSI/batt/hop/vu */
+    bool      self;        /* dernier état (évite de re-styler la bordure) */
+} node_row_t;
+
+static node_row_t s_nrows[NODE_ROW_MAX];
+static int        s_nrow_count;
+static lv_obj_t  *nodes_list;
+static int        nodes_sort;          /* 0 = vu récemment, 1 = meilleur SNR */
+static lv_obj_t  *nodes_sort_lbl;
+
+static node_row_t *node_row_find(uint32_t num) {
+    for (int i = 0; i < s_nrow_count; i++)
+        if (s_nrows[i].num == num) return &s_nrows[i];
+    return NULL;
+}
+
+static node_row_t *node_row_create(uint32_t num) {
+    if (s_nrow_count >= NODE_ROW_MAX || !nodes_list) return NULL;
+    node_row_t *r = &s_nrows[s_nrow_count++];
+    r->num = num;
+    r->self = false;
+    r->row = lv_obj_create(nodes_list);
+    lv_obj_set_size(r->row, LV_PCT(100), LV_SIZE_CONTENT);
+    panel(r->row, CY_BORDER);
+    lv_obj_clear_flag(r->row, LV_OBJ_FLAG_SCROLLABLE);
+    r->name_lbl = label(r->row, "", FONT_BODY, CY_TEXT);
+    lv_obj_align(r->name_lbl, LV_ALIGN_TOP_LEFT, 0, 0);
+    r->right_lbl = label(r->row, "", FONT_SMALL, CY_DIM);
+    lv_obj_align(r->right_lbl, LV_ALIGN_TOP_RIGHT, 0, 0);
+    r->meta_lbl = label(r->row, "", FONT_SMALL, CY_DIM);
+    lv_obj_align(r->meta_lbl, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_style_pad_top(r->meta_lbl, 18, 0);
+    return r;
+}
+
+static void node_row_update(node_row_t *r, const mesh_node_t *n) {
+    if (r->self != n->self) {
+        lv_obj_set_style_border_color(r->row, lv_color_hex(n->self ? CY_CYAN : CY_BORDER), 0);
+        lv_obj_set_style_text_color(r->name_lbl, lv_color_hex(n->self ? CY_CYAN : CY_TEXT), 0);
+        r->self = n->self;
+    }
+    lv_label_set_text(r->name_lbl, n->name);
+    if (n->self) {
+        lv_label_set_text(r->right_lbl, LV_SYMBOL_HOME " VOUS");
+        lv_obj_set_style_text_color(r->right_lbl, lv_color_hex(CY_CYAN), 0);
+    } else {
+        lv_label_set_text(r->right_lbl, n->id);
+        lv_obj_set_style_text_color(r->right_lbl, lv_color_hex(CY_DIM), 0);
+    }
+    char best[12];
+    if (n->best_snr == -128) snprintf(best, sizeof(best), "-");
+    else                     snprintf(best, sizeof(best), "%d", n->best_snr);
+    char stat[112];
+    snprintf(stat, sizeof(stat),
+             "SNR %d(max%s)  RSSI %d  " LV_SYMBOL_CHARGE "%d%%  %dhop  vu %s",
+             n->snr, best, n->rssi, n->batt, n->hops, n->last);
+    lv_label_set_text(r->meta_lbl, stat);
+}
+
+static int node_cmp(const void *a, const void *b) {
+    const mesh_node_t *na = *(const mesh_node_t * const *)a;
+    const mesh_node_t *nb = *(const mesh_node_t * const *)b;
+    if (na->self != nb->self) return na->self ? -1 : 1;     /* soi toujours en tête */
+    if (nodes_sort == 1) {                                  /* meilleur SNR d'abord */
+        if (na->snr != nb->snr) return nb->snr - na->snr;
+    }
+    /* défaut / égalité SNR : vu le plus récemment d'abord */
+    if (na->last_heard != nb->last_heard)
+        return (nb->last_heard > na->last_heard) ? 1 : -1;
+    return 0;
+}
+
+/* Synchronise la liste avec l'état backend (création/maj/réordonnancement). */
+static void nodes_sync(void) {
+    if (!nodes_list) return;
+    static const mesh_node_t *arr[NODE_ROW_MAX];
+    int n = mesh_node_count();
+    if (n > NODE_ROW_MAX) n = NODE_ROW_MAX;
+    for (int i = 0; i < n; i++) arr[i] = mesh_node(i);
+    qsort(arr, n, sizeof(arr[0]), node_cmp);
+
+    for (int i = 0; i < n; i++) {
+        const mesh_node_t *nd = arr[i];
+        node_row_t *r = node_row_find(nd->num);
+        if (!r) r = node_row_create(nd->num);
+        if (!r) continue;
+        node_row_update(r, nd);
+        lv_obj_move_to_index(r->row, i);     /* applique l'ordre du tri */
+    }
+}
+
+static void nodes_sort_cb(lv_event_t *e) {
+    (void)e;
+    nodes_sort = !nodes_sort;
+    if (nodes_sort_lbl)
+        lv_label_set_text(nodes_sort_lbl,
+                          nodes_sort ? LV_SYMBOL_GPS " SNR" : LV_SYMBOL_GPS " RECENT");
+    nodes_sync();
+}
+
 static void build_nodes(void) {
+    s_nrow_count = 0;        /* anciennes lignes détruites par lv_obj_clean(content) */
+    nodes_list = NULL;
+
+    /* en-tête : bouton de bascule du tri */
+    lv_obj_t *hdr = lv_obj_create(content);
+    lv_obj_set_size(hdr, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(hdr);
+    lv_obj_set_style_pad_all(hdr, 5, 0);
+    lv_obj_t *btn = lv_button_create(hdr);
+    lv_obj_set_size(btn, 150, 28);
+    lv_obj_set_style_radius(btn, 2, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(CY_PANEL2), 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_add_event_cb(btn, nodes_sort_cb, LV_EVENT_CLICKED, NULL);
+    nodes_sort_lbl = label(btn, nodes_sort ? LV_SYMBOL_GPS " TRI: SNR" : LV_SYMBOL_GPS " TRI: RECENT",
+                           FONT_SMALL, CY_CYAN);
+    lv_obj_center(nodes_sort_lbl);
+
     lv_obj_t *list = lv_obj_create(content);
-    lv_obj_set_size(list, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_width(list, LV_PCT(100));
+    lv_obj_set_flex_grow(list, 1);
     flat(list);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(list, 5, 0);
     lv_obj_set_style_pad_all(list, 5, 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    nodes_list = list;
 
-    for (int i = 0; i < mesh_node_count(); i++) {
-        const mesh_node_t *n = mesh_node(i);
-        lv_obj_t *row = lv_obj_create(list);
-        lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-        panel(row, n->self ? CY_CYAN : CY_BORDER);
-        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-
-        lv_obj_t *nm = label(row, n->name, FONT_BODY, n->self ? CY_CYAN : CY_TEXT);
-        lv_obj_align(nm, LV_ALIGN_TOP_LEFT, 0, 0);
-        if (n->self) {
-            /* badge explicite : ce nœud est le nôtre */
-            lv_obj_t *me = label(row, LV_SYMBOL_HOME " VOUS", FONT_SMALL, CY_CYAN);
-            lv_obj_align(me, LV_ALIGN_TOP_RIGHT, 0, 0);
-        } else {
-            lv_obj_t *id = label(row, n->id, FONT_SMALL, CY_DIM);
-            lv_obj_align(id, LV_ALIGN_TOP_RIGHT, 0, 0);
-        }
-
-        char stat[80];
-        snprintf(stat, sizeof(stat), "SNR %ddB  RSSI %ddBm  " LV_SYMBOL_CHARGE "%d%%  %dhop  %s",
-                 n->snr, n->rssi, n->batt, n->hops, n->last);
-        lv_obj_t *st = label(row, stat, FONT_SMALL, CY_DIM);
-        lv_obj_align(st, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-        lv_obj_set_style_pad_top(st, 18, 0);
-    }
+    nodes_sync();
 }
 
 /* Rafraîchit la vue courante quand le backend Meshtastic signale du neuf
    (nouveau message reçu, ACK, nœud découvert…). */
 static void mesh_refresh_cb(lv_timer_t *t) {
     (void)t;
+    /* Vue NODES : maj incrémentale à chaque tick (nouveaux nœuds, signaux ET
+     * rafraîchissement du « vu il y a X ») sans recréer la liste -> scroll gardé. */
+    if (cur_tab == APP_NODES && nodes_list) nodes_sync();
+
     if (!mesh_take_dirty()) return;
     if (cm_ov && cm_list) cm_rebuild_list();   /* canaux changés -> rafraîchit le gestionnaire */
     if (cur_tab == APP_CHAT && msg_list) rebuild_messages();
-    else if (cur_tab == APP_NODES)       show_tab(APP_NODES);
     else if (cur_tab == APP_HOME)        update_msg_badge();
 }
 
