@@ -163,8 +163,15 @@ EOF
             exec /usr/bin/nmcli device wifi connect "$2" password "$3"
         fi
         ;;
+    wifi-wps)
+        # Push-button WPS via le socket du wpa_supplicant pilote par NetworkManager.
+        # NM ne sait plus declencher WPS depuis ~2017 : on parle directement a
+        # son supplicant. Le supplicant scanne et associe ; NM voit l'asso et
+        # cree une connexion. Echec si le timeout WPS (~120s) expire.
+        exec /usr/sbin/wpa_cli -i wlan0 wps_pbc
+        ;;
     *)
-        echo "usage: $0 {reboot|poweroff|ssh-on|ssh-off|wifi-scan|wifi-connect SSID [PASS]|bt-scan|bt-pair MAC|bt-connect MAC|bt-remove MAC|bt-serial-on|bt-serial-off}" >&2
+        echo "usage: $0 {reboot|poweroff|ssh-on|ssh-off|wifi-scan|wifi-connect SSID [PASS]|wifi-wps|bt-scan|bt-pair MAC|bt-connect MAC|bt-remove MAC|bt-serial-on|bt-serial-off}" >&2
         exit 2
         ;;
 esac

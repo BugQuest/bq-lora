@@ -1852,7 +1852,26 @@ static void confirm_dialog(const char *msg, void (*on_yes)(void)) {
 static lv_obj_t *wifi_ov, *wifi_list_ov, *wifi_status, *wifi_pwd_panel, *wifi_pwd_ta;
 static char wifi_pending_ssid[64];
 
-static void wifi_modal_close_e(lv_event_t *e) { (void)e; if (wifi_ov) { lv_obj_delete(wifi_ov); wifi_ov = NULL; } }
+/* ----- mode QR (scanner WiFi par code) ----- */
+#define WIFI_QR_W 320
+#define WIFI_QR_H 240
+static uint8_t  wifi_qr_buf[WIFI_QR_W * WIFI_QR_H * 2] __attribute__((aligned(4)));
+static lv_obj_t *wifi_qr_panel, *wifi_qr_canvas, *wifi_qr_status;
+
+/* ----- mode WPS ----- */
+static lv_obj_t *wifi_wps_panel, *wifi_wps_status;
+static lv_timer_t *wifi_wps_timer;
+static int       wifi_wps_remaining;       /* secondes restantes affichees */
+
+static void wifi_modal_close_e(lv_event_t *e) {
+    (void)e;
+    /* arrete proprement le flux camera / timer WPS si actifs sous la modal */
+    sys_qr_stop();
+    if (wifi_wps_timer) { lv_timer_delete(wifi_wps_timer); wifi_wps_timer = NULL; }
+    wifi_qr_canvas = NULL; wifi_qr_status = NULL; wifi_qr_panel = NULL;
+    wifi_wps_status = NULL; wifi_wps_panel = NULL;
+    if (wifi_ov) { lv_obj_delete(wifi_ov); wifi_ov = NULL; }
+}
 
 static void wifi_scan_done(const wifi_net_t *list, int n, void *user);
 static void wifi_rescan_e(lv_event_t *e) {
@@ -1967,6 +1986,181 @@ static void wifi_scan_done(const wifi_net_t *list, int n, void *user) {
     lv_label_set_text(wifi_status, "");
 }
 
+/* ----- Parser standard WiFi-QR (NFC/Wi-Fi Alliance) -----
+ * Format : WIFI:T:<type>;S:<ssid>;P:<pwd>;[H:<bool>;];;
+ * Caracteres ';' ':' ',' '\\' '"' echappes par '\'. Le parsing s'arrete au
+ * double ';;' final. Renvoie true si SSID present. */
+static bool wifi_qr_parse(const char *src, char *ssid, size_t ss, char *pass, size_t ps,
+                          char *auth, size_t as)
+{
+    ssid[0] = pass[0] = auth[0] = 0;
+    if (!src || strncmp(src, "WIFI:", 5) != 0) return false;
+    const char *p = src + 5;
+    while (*p && *p != ';') {                       /* boucle clef:valeur */
+        if (p[1] != ':') break;
+        char key = *p; p += 2;
+        char val[128]; size_t k = 0;
+        while (*p && *p != ';') {
+            if (*p == '\\' && p[1]) { if (k < sizeof(val) - 1) val[k++] = p[1]; p += 2; }
+            else                      { if (k < sizeof(val) - 1) val[k++] = *p; p++; }
+        }
+        val[k] = 0;
+        if (*p == ';') p++;
+        switch (key) {
+            case 'S': strncpy(ssid, val, ss - 1); ssid[ss - 1] = 0; break;
+            case 'P': strncpy(pass, val, ps - 1); pass[ps - 1] = 0; break;
+            case 'T': strncpy(auth, val, as - 1); auth[as - 1] = 0; break;
+            default: break;
+        }
+    }
+    return ssid[0] != 0;
+}
+
+/* ----- Panneau QR : flux camera + decodage zbar ----- */
+static void wifi_qr_close(void) {
+    sys_qr_stop();
+    if (wifi_qr_panel) { lv_obj_delete(wifi_qr_panel); wifi_qr_panel = NULL; }
+    wifi_qr_canvas = NULL; wifi_qr_status = NULL;
+}
+static void wifi_qr_close_e(lv_event_t *e) { (void)e; wifi_qr_close(); }
+
+static void wifi_qr_frame_cb(void *user) {
+    (void)user;
+    if (wifi_qr_canvas) lv_obj_invalidate(wifi_qr_canvas);
+}
+
+static void wifi_qr_hit_cb(const char *payload, void *user) {
+    (void)user;
+    char ssid[64], pass[128], auth[16];
+    if (wifi_qr_parse(payload, ssid, sizeof(ssid), pass, sizeof(pass), auth, sizeof(auth))) {
+        wifi_qr_close();
+        if (wifi_status) {
+            char b[160];
+            snprintf(b, sizeof(b), "QR : %s -> connexion...", ssid);
+            lv_label_set_text(wifi_status, b);
+            lv_obj_set_style_text_color(wifi_status, lv_color_hex(CY_CYAN), 0);
+        }
+        sys_wifi_connect_async(ssid, pass, wifi_connect_done, NULL);
+    } else if (wifi_qr_status) {
+        /* QR detecte mais pas au format WiFi : on continue a scanner */
+        lv_label_set_text(wifi_qr_status, "QR non-WiFi, continue...");
+        lv_obj_set_style_text_color(wifi_qr_status, lv_color_hex(CY_AMBER), 0);
+        /* on re-arme : sys_qr_stop+start est trop lourd, on s'attend a ce que le
+         * decodeur retombe sur un autre QR ; ici on quitte au cas ou. */
+    }
+}
+
+static void wifi_qr_open_e(lv_event_t *e) {
+    (void)e;
+    if (wifi_qr_panel) return;
+    wifi_qr_panel = lv_obj_create(wifi_ov);
+    lv_obj_set_size(wifi_qr_panel, LV_PCT(96), 360);
+    lv_obj_align(wifi_qr_panel, LV_ALIGN_CENTER, 0, 0);
+    panel(wifi_qr_panel, CY_AMBER);
+    lv_obj_clear_flag(wifi_qr_panel, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *t = label(wifi_qr_panel, LV_SYMBOL_IMAGE "  SCAN QR WiFi", FONT_BODY, CY_AMBER);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 0);
+
+    lv_obj_t *frame = lv_obj_create(wifi_qr_panel);
+    lv_obj_set_size(frame, WIFI_QR_W + 6, WIFI_QR_H + 6);
+    panel(frame, CY_BORDER);
+    lv_obj_set_style_pad_all(frame, 2, 0);
+    lv_obj_align(frame, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(frame, LV_OBJ_FLAG_SCROLLABLE);
+    wifi_qr_canvas = lv_canvas_create(frame);
+    lv_canvas_set_buffer(wifi_qr_canvas, wifi_qr_buf, WIFI_QR_W, WIFI_QR_H,
+                         LV_COLOR_FORMAT_RGB565);
+    lv_obj_center(wifi_qr_canvas);
+    lv_canvas_fill_bg(wifi_qr_canvas, lv_color_black(), LV_OPA_COVER);
+
+    wifi_qr_status = label(wifi_qr_panel, "Cadre un QR WiFi...", FONT_SMALL, CY_DIM);
+    lv_obj_align(wifi_qr_status, LV_ALIGN_BOTTOM_MID, 0, -40);
+
+    lv_obj_t *bb = lv_button_create(wifi_qr_panel);
+    lv_obj_set_size(bb, 120, 28);
+    lv_obj_align(bb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_radius(bb, 2, 0);
+    lv_obj_set_style_bg_color(bb, lv_color_hex(CY_PANEL2), 0);
+    lv_obj_set_style_shadow_width(bb, 0, 0);
+    lv_obj_add_event_cb(bb, wifi_qr_close_e, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *bl = label(bb, LV_SYMBOL_CLOSE "  ANNULER", FONT_SMALL, CY_DIM);
+    lv_obj_center(bl);
+
+    sys_qr_start(wifi_qr_buf, WIFI_QR_W, WIFI_QR_H,
+                 wifi_qr_frame_cb, wifi_qr_hit_cb, NULL);
+}
+
+/* ----- Panneau WPS push-button ----- */
+static void wifi_wps_close(void) {
+    if (wifi_wps_timer) { lv_timer_delete(wifi_wps_timer); wifi_wps_timer = NULL; }
+    if (wifi_wps_panel) { lv_obj_delete(wifi_wps_panel); wifi_wps_panel = NULL; }
+    wifi_wps_status = NULL;
+}
+static void wifi_wps_close_e(lv_event_t *e) { (void)e; wifi_wps_close(); }
+
+static void wifi_wps_tick(lv_timer_t *t) {
+    (void)t;
+    if (--wifi_wps_remaining <= 0) {
+        if (wifi_wps_timer) { lv_timer_delete(wifi_wps_timer); wifi_wps_timer = NULL; }
+        return;
+    }
+    if (wifi_wps_status) {
+        char b[64]; snprintf(b, sizeof(b),
+                             "Appuie WPS sur le routeur... %ds", wifi_wps_remaining);
+        lv_label_set_text(wifi_wps_status, b);
+    }
+}
+
+static void wifi_wps_done(bool ok, const char *msg, void *user) {
+    (void)user;
+    if (wifi_wps_timer) { lv_timer_delete(wifi_wps_timer); wifi_wps_timer = NULL; }
+    if (wifi_wps_status) {
+        lv_label_set_text(wifi_wps_status, msg);
+        lv_obj_set_style_text_color(wifi_wps_status,
+            lv_color_hex(ok ? CY_GREEN : CY_MAGENTA), 0);
+    }
+    if (wifi_status) {
+        lv_label_set_text(wifi_status, ok ? "WPS : connecte" : "WPS : echec");
+        lv_obj_set_style_text_color(wifi_status,
+            lv_color_hex(ok ? CY_GREEN : CY_MAGENTA), 0);
+    }
+}
+
+static void wifi_wps_open_e(lv_event_t *e) {
+    (void)e;
+    if (wifi_wps_panel) return;
+    wifi_wps_panel = lv_obj_create(wifi_ov);
+    lv_obj_set_size(wifi_wps_panel, LV_PCT(94), 140);
+    lv_obj_align(wifi_wps_panel, LV_ALIGN_CENTER, 0, -10);
+    panel(wifi_wps_panel, CY_AMBER);
+    lv_obj_clear_flag(wifi_wps_panel, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *t = label(wifi_wps_panel, LV_SYMBOL_WIFI "  WPS push-button", FONT_BODY, CY_AMBER);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 0);
+
+    wifi_wps_status = label(wifi_wps_panel,
+                            "Appuie sur le bouton WPS du routeur...",
+                            FONT_SMALL, CY_TEXT);
+    lv_obj_align(wifi_wps_status, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_width(wifi_wps_status, LV_PCT(95));
+    lv_label_set_long_mode(wifi_wps_status, LV_LABEL_LONG_WRAP);
+
+    lv_obj_t *bb = lv_button_create(wifi_wps_panel);
+    lv_obj_set_size(bb, 120, 28);
+    lv_obj_align(bb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_radius(bb, 2, 0);
+    lv_obj_set_style_bg_color(bb, lv_color_hex(CY_PANEL2), 0);
+    lv_obj_set_style_shadow_width(bb, 0, 0);
+    lv_obj_add_event_cb(bb, wifi_wps_close_e, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *bl = label(bb, LV_SYMBOL_CLOSE "  FERMER", FONT_SMALL, CY_DIM);
+    lv_obj_center(bl);
+
+    wifi_wps_remaining = 120;
+    wifi_wps_timer = lv_timer_create(wifi_wps_tick, 1000, NULL);
+    sys_wifi_wps_async(wifi_wps_done, NULL);
+}
+
 static void wifi_modal_open(void) {
     wifi_ov = lv_obj_create(lv_layer_top());
     lv_obj_set_size(wifi_ov, LV_PCT(100), LV_PCT(100));
@@ -1983,6 +2177,8 @@ static void wifi_modal_open(void) {
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
     small_button(bar, LV_SYMBOL_LEFT "  FERMER",   CY_DIM,  wifi_modal_close_e);
     small_button(bar, LV_SYMBOL_REFRESH "  RESCAN", CY_CYAN, wifi_rescan_e);
+    small_button(bar, LV_SYMBOL_IMAGE   "  QR",     CY_AMBER, wifi_qr_open_e);
+    small_button(bar, LV_SYMBOL_WIFI    "  WPS",    CY_AMBER, wifi_wps_open_e);
     wifi_status = label(wifi_ov, "scan en cours...", FONT_SMALL, CY_CYAN);
     lv_obj_align(wifi_status, LV_ALIGN_TOP_MID, 0, 44);
     wifi_list_ov = lv_obj_create(wifi_ov);
@@ -2176,6 +2372,8 @@ static void build_camera(void);
 static void build_gallery(void);
 static lv_obj_t *cam_canvas, *cam_status, *cam_btn;   /* fwd : nullifies au changement d'onglet */
 static lv_obj_t *gal_canvas, *gal_status, *gal_del_btn, *gal_prev_btn, *gal_next_btn;
+static lv_obj_t *gal_frame, *gal_hd_canvas, *gal_nav_btn;
+static lv_obj_t *gal_browse_row, *gal_nav_row, *gal_zoom_lbl;
 
 static void show_tab(int app) {
     if (sys_refresh_timer) { lv_timer_delete(sys_refresh_timer); sys_refresh_timer = NULL; }
@@ -2184,6 +2382,8 @@ static void show_tab(int app) {
     cam_canvas = NULL; cam_status = NULL; cam_btn = NULL;
     gal_canvas = NULL; gal_status = NULL;
     gal_del_btn = NULL; gal_prev_btn = NULL; gal_next_btn = NULL;
+    gal_frame = NULL; gal_hd_canvas = NULL; gal_nav_btn = NULL;
+    gal_browse_row = NULL; gal_nav_row = NULL; gal_zoom_lbl = NULL;
     /* null tous les pointeurs vers des labels qu'on s'apprete a liberer */
     sys_lbl_host = NULL;
     sys_lbl_wifi = NULL;
@@ -2702,6 +2902,125 @@ static char      gal_paths[GAL_MAX][256];
 static int       gal_n, gal_idx;
 static uint8_t   gal_buf[CAM_PV_W * CAM_PV_H * 2] __attribute__((aligned(4)));
 
+/* ---------- Mode navigation (zoom + déplacement) ----------
+ * Idée : pour zoomer on a besoin d'une source plus détaillée que la preview
+ * 256×192. On rend une seconde preview HD 768×576 (~880 ko RGB565) à la
+ * demande, dans un canvas plein-cadre clippé par le frame d'affichage.
+ *  - transform_scale gère le facteur de zoom (256 = 1:1 HD = ~3× le « fit »)
+ *  - lv_obj_set_pos translate ce canvas dans le frame (= panoramique)
+ *  - le drag tactile (LV_EVENT_PRESSING + lv_indev_get_vect) modifie l'offset
+ *  - les boutons +/-/FIT/EXIT remplacent prev/del/next pendant le mode. */
+#define CAM_HD_W 768
+#define CAM_HD_H 576
+static uint8_t   gal_hd_buf[CAM_HD_W * CAM_HD_H * 2] __attribute__((aligned(4)));
+/* Échelle LVGL : 256 = 1:1. FIT = échelle pour que CAM_HD_W tienne dans CAM_PV_W. */
+#define GAL_FIT_SCALE   ((CAM_PV_W * 256) / CAM_HD_W)        /* ≈ 85 */
+static bool      gal_nav_mode;
+static int       gal_zoom;       /* GAL_FIT_SCALE .. 256 */
+static int       gal_ox, gal_oy; /* position top-left du canvas HD dans le frame (px) */
+
+static int gal_view_w(void) { return (CAM_HD_W * gal_zoom) / 256; }
+static int gal_view_h(void) { return (CAM_HD_H * gal_zoom) / 256; }
+
+static void gal_clamp_pan(void) {
+    int vw = gal_view_w(), vh = gal_view_h();
+    int min_x = CAM_PV_W - vw, min_y = CAM_PV_H - vh;
+    if (vw <= CAM_PV_W) gal_ox = min_x / 2;
+    else { if (gal_ox > 0) gal_ox = 0; if (gal_ox < min_x) gal_ox = min_x; }
+    if (vh <= CAM_PV_H) gal_oy = min_y / 2;
+    else { if (gal_oy > 0) gal_oy = 0; if (gal_oy < min_y) gal_oy = min_y; }
+}
+
+static void gal_apply_transform(void) {
+    if (!gal_hd_canvas) return;
+    lv_obj_set_style_transform_pivot_x(gal_hd_canvas, 0, 0);
+    lv_obj_set_style_transform_pivot_y(gal_hd_canvas, 0, 0);
+    lv_obj_set_style_transform_scale_x(gal_hd_canvas, gal_zoom, 0);
+    lv_obj_set_style_transform_scale_y(gal_hd_canvas, gal_zoom, 0);
+    lv_obj_set_pos(gal_hd_canvas, gal_ox, gal_oy);
+    if (gal_zoom_lbl) {
+        /* zoom affiché relatif au « fit » (×1.0 = pleine vue, ×3.0 = pixel HD natif) */
+        int pct = (gal_zoom * 100 + GAL_FIT_SCALE / 2) / GAL_FIT_SCALE;
+        char b[16]; snprintf(b, sizeof(b), "x%d.%d", pct / 100, (pct % 100) / 10);
+        lv_label_set_text(gal_zoom_lbl, b);
+    }
+}
+
+static void gal_hd_done(bool ok, const char *preview, void *user) {
+    (void)user;
+    if (!gal_hd_canvas) return;
+    if (ok) {
+        FILE *f = fopen(preview, "rb");
+        if (f) {
+            size_t got = fread(gal_hd_buf, 1, sizeof(gal_hd_buf), f);
+            fclose(f);
+            if (got == sizeof(gal_hd_buf)) { lv_obj_invalidate(gal_hd_canvas); return; }
+        }
+    }
+    lv_canvas_fill_bg(gal_hd_canvas, lv_color_black(), LV_OPA_COVER);
+}
+
+static void gal_set_nav_mode(bool on) {
+    gal_nav_mode = on;
+    if (gal_browse_row) { if (on) lv_obj_add_flag(gal_browse_row, LV_OBJ_FLAG_HIDDEN);
+                          else    lv_obj_clear_flag(gal_browse_row, LV_OBJ_FLAG_HIDDEN); }
+    if (gal_nav_row)    { if (on) lv_obj_clear_flag(gal_nav_row, LV_OBJ_FLAG_HIDDEN);
+                          else    lv_obj_add_flag(gal_nav_row, LV_OBJ_FLAG_HIDDEN); }
+    if (gal_canvas)     { if (on) lv_obj_add_flag(gal_canvas, LV_OBJ_FLAG_HIDDEN);
+                          else    lv_obj_clear_flag(gal_canvas, LV_OBJ_FLAG_HIDDEN); }
+    if (gal_hd_canvas)  { if (on) lv_obj_clear_flag(gal_hd_canvas, LV_OBJ_FLAG_HIDDEN);
+                          else    lv_obj_add_flag(gal_hd_canvas, LV_OBJ_FLAG_HIDDEN); }
+
+    if (on && gal_n > 0 && gal_hd_canvas) {
+        gal_zoom = GAL_FIT_SCALE;
+        gal_ox = gal_oy = 0;
+        gal_clamp_pan();
+        gal_apply_transform();
+        lv_canvas_fill_bg(gal_hd_canvas, lv_color_black(), LV_OPA_COVER);
+        sys_cam_preview_async(gal_paths[gal_idx], CAM_HD_W, CAM_HD_H, gal_hd_done, NULL);
+    }
+}
+
+static void gal_nav_enter_cb(lv_event_t *e) { (void)e; if (gal_n > 0) gal_set_nav_mode(true); }
+static void gal_nav_exit_cb (lv_event_t *e) { (void)e; gal_set_nav_mode(false); }
+
+/* Zoom centré sur le milieu du viewport : on conserve la position du pixel
+ * central de l'image lors du changement d'échelle. */
+static void gal_zoom_apply(int new_zoom) {
+    if (new_zoom < GAL_FIT_SCALE) new_zoom = GAL_FIT_SCALE;
+    if (new_zoom > 256)            new_zoom = 256;
+    int cx = CAM_PV_W / 2, cy = CAM_PV_H / 2;
+    int px = cx - gal_ox, py = cy - gal_oy;                     /* coord image actuelle */
+    int npx = (px * new_zoom) / (gal_zoom ? gal_zoom : 1);
+    int npy = (py * new_zoom) / (gal_zoom ? gal_zoom : 1);
+    gal_ox = cx - npx;
+    gal_oy = cy - npy;
+    gal_zoom = new_zoom;
+    gal_clamp_pan();
+    gal_apply_transform();
+}
+
+static void gal_zoom_in_cb   (lv_event_t *e) { (void)e; gal_zoom_apply(gal_zoom * 3 / 2); }
+static void gal_zoom_out_cb  (lv_event_t *e) { (void)e; gal_zoom_apply(gal_zoom * 2 / 3); }
+static void gal_zoom_reset_cb(lv_event_t *e) {
+    (void)e;
+    gal_zoom = GAL_FIT_SCALE; gal_ox = gal_oy = 0;
+    gal_clamp_pan(); gal_apply_transform();
+}
+
+/* Drag tactile -> pan (uniquement en mode nav et au-delà du fit). */
+static void gal_frame_drag_cb(lv_event_t *e) {
+    if (!gal_nav_mode) return;
+    if (lv_event_get_code(e) != LV_EVENT_PRESSING) return;
+    lv_indev_t *id = lv_indev_active();
+    if (!id) return;
+    lv_point_t v; lv_indev_get_vect(id, &v);
+    if (v.x == 0 && v.y == 0) return;
+    gal_ox += v.x; gal_oy += v.y;
+    gal_clamp_pan();
+    gal_apply_transform();
+}
+
 static void gal_set_nav(bool on) {
     if (gal_prev_btn) { if (on) lv_obj_clear_state(gal_prev_btn, LV_STATE_DISABLED);
                         else    lv_obj_add_state(gal_prev_btn, LV_STATE_DISABLED); }
@@ -2709,6 +3028,8 @@ static void gal_set_nav(bool on) {
                         else    lv_obj_add_state(gal_next_btn, LV_STATE_DISABLED); }
     if (gal_del_btn)  { if (on) lv_obj_clear_state(gal_del_btn,  LV_STATE_DISABLED);
                         else    lv_obj_add_state(gal_del_btn,  LV_STATE_DISABLED); }
+    if (gal_nav_btn)  { if (on) lv_obj_clear_state(gal_nav_btn,  LV_STATE_DISABLED);
+                        else    lv_obj_add_state(gal_nav_btn,  LV_STATE_DISABLED); }
 }
 
 static void gal_preview_done(bool ok, const char *preview, void *user) {
@@ -2751,8 +3072,8 @@ static void gal_show(int idx) {
     sys_cam_preview_async(p, CAM_PV_W, CAM_PV_H, gal_preview_done, NULL);
 }
 
-static void gal_prev_cb(lv_event_t *e) { (void)e; gal_show(gal_idx - 1); }
-static void gal_next_cb(lv_event_t *e) { (void)e; gal_show(gal_idx + 1); }
+static void gal_prev_cb(lv_event_t *e) { (void)e; if (gal_nav_mode) gal_set_nav_mode(false); gal_show(gal_idx - 1); }
+static void gal_next_cb(lv_event_t *e) { (void)e; if (gal_nav_mode) gal_set_nav_mode(false); gal_show(gal_idx + 1); }
 
 static void gal_delete_yes(void) {
     if (gal_n <= 0 || !gal_canvas) return;
@@ -2783,31 +3104,60 @@ static void build_gallery(void) {
 
     label(col, "GALERIE", FONT_BIG, CY_CYAN);
 
-    lv_obj_t *frame = lv_obj_create(col);
-    lv_obj_set_size(frame, CAM_PV_W + 6, CAM_PV_H + 6);
-    panel(frame, CY_BORDER);
-    lv_obj_set_style_pad_all(frame, 2, 0);
-    lv_obj_clear_flag(frame, LV_OBJ_FLAG_SCROLLABLE);
+    gal_frame = lv_obj_create(col);
+    lv_obj_set_size(gal_frame, CAM_PV_W + 6, CAM_PV_H + 6);
+    panel(gal_frame, CY_BORDER);
+    lv_obj_set_style_pad_all(gal_frame, 2, 0);
+    lv_obj_clear_flag(gal_frame, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(gal_frame, LV_OBJ_FLAG_CLICKABLE);      /* reçoit les press */
+    lv_obj_add_event_cb(gal_frame, gal_frame_drag_cb, LV_EVENT_PRESSING, NULL);
 
-    gal_canvas = lv_canvas_create(frame);
+    gal_canvas = lv_canvas_create(gal_frame);
     lv_canvas_set_buffer(gal_canvas, gal_buf, CAM_PV_W, CAM_PV_H,
                          LV_COLOR_FORMAT_RGB565);
     lv_obj_center(gal_canvas);
     lv_canvas_fill_bg(gal_canvas, lv_color_black(), LV_OPA_COVER);
 
+    /* canvas HD pour le mode navigation : caché par défaut, clippé par gal_frame */
+    gal_hd_canvas = lv_canvas_create(gal_frame);
+    lv_canvas_set_buffer(gal_hd_canvas, gal_hd_buf, CAM_HD_W, CAM_HD_H,
+                         LV_COLOR_FORMAT_RGB565);
+    lv_obj_set_pos(gal_hd_canvas, 0, 0);
+    lv_canvas_fill_bg(gal_hd_canvas, lv_color_black(), LV_OPA_COVER);
+    lv_obj_add_flag(gal_hd_canvas, LV_OBJ_FLAG_HIDDEN);
+
     gal_status = label(col, "...", FONT_SMALL, CY_DIM);
     lv_obj_set_width(gal_status, LV_PCT(100));
     lv_label_set_long_mode(gal_status, LV_LABEL_LONG_DOT);
 
-    lv_obj_t *row = lv_obj_create(col);
-    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-    flat(row);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(row, 6, 0);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    gal_prev_btn = small_button(row, LV_SYMBOL_LEFT,  CY_CYAN,    gal_prev_cb);
-    gal_del_btn  = small_button(row, LV_SYMBOL_TRASH, CY_MAGENTA, gal_del_cb);
-    gal_next_btn = small_button(row, LV_SYMBOL_RIGHT, CY_CYAN,    gal_next_cb);
+    /* ----- barre de boutons : navigation entre photos (mode browse) ----- */
+    gal_browse_row = lv_obj_create(col);
+    lv_obj_set_size(gal_browse_row, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(gal_browse_row);
+    lv_obj_set_flex_flow(gal_browse_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(gal_browse_row, 6, 0);
+    lv_obj_clear_flag(gal_browse_row, LV_OBJ_FLAG_SCROLLABLE);
+    gal_prev_btn = small_button(gal_browse_row, LV_SYMBOL_LEFT,      CY_CYAN,    gal_prev_cb);
+    gal_del_btn  = small_button(gal_browse_row, LV_SYMBOL_TRASH,     CY_MAGENTA, gal_del_cb);
+    gal_nav_btn  = small_button(gal_browse_row, LV_SYMBOL_EYE_OPEN,  CY_AMBER,   gal_nav_enter_cb);
+    gal_next_btn = small_button(gal_browse_row, LV_SYMBOL_RIGHT,     CY_CYAN,    gal_next_cb);
+
+    /* ----- barre de boutons : zoom/pan (mode nav) ----- */
+    gal_nav_row = lv_obj_create(col);
+    lv_obj_set_size(gal_nav_row, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(gal_nav_row);
+    lv_obj_set_flex_flow(gal_nav_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(gal_nav_row, 6, 0);
+    lv_obj_clear_flag(gal_nav_row, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(gal_nav_row, LV_SYMBOL_MINUS, CY_CYAN, gal_zoom_out_cb);
+    gal_zoom_lbl = label(gal_nav_row, "x1.0", FONT_SMALL, CY_AMBER);
+    small_button(gal_nav_row, LV_SYMBOL_PLUS,  CY_CYAN, gal_zoom_in_cb);
+    small_button(gal_nav_row, LV_SYMBOL_LOOP,  CY_DIM,  gal_zoom_reset_cb);
+    small_button(gal_nav_row, LV_SYMBOL_CLOSE, CY_MAGENTA, gal_nav_exit_cb);
+    lv_obj_add_flag(gal_nav_row, LV_OBJ_FLAG_HIDDEN);
+
+    gal_nav_mode = false;
+    gal_zoom = GAL_FIT_SCALE; gal_ox = gal_oy = 0;
 
     gal_n = sys_cam_photo_list(gal_paths, GAL_MAX);
     gal_idx = 0;

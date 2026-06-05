@@ -135,6 +135,20 @@ typedef void (*wifi_connect_cb_t)(bool ok, const char *msg, void *user);
 void sys_wifi_connect_async(const char *ssid, const char *password,
                             wifi_connect_cb_t cb, void *user);
 
+/* WPS push-button (PBC). Lance wpa_cli wps_pbc via meshui-ctl puis surveille
+ * l'apparition d'une connexion active sur wlan0 (timeout 120 s). */
+void sys_wifi_wps_async(wifi_connect_cb_t cb, void *user);
+
+/* Scanner QR-code (utilise le flux camera). Identique à sys_cam_stream_start
+ * pour l'affichage live, mais en plus chaque frame est passée à libzbar ; à la
+ * première détection, on_hit est appelé sur le thread UI avec le payload texte
+ * du QR (utf-8). on_hit n'est appelé qu'une seule fois — l'UI peut arrêter le
+ * flux et traiter le résultat (ex. payload "WIFI:T:WPA;S:...;P:...;;"). */
+typedef void (*qr_hit_cb_t)(const char *payload, void *user);
+void sys_qr_start(uint8_t *buf, int w, int h,
+                  cam_frame_cb_t on_frame, qr_hit_cb_t on_hit, void *user);
+void sys_qr_stop(void);
+
 /* Bluetooth : scan BLE/Classic + appairage asynchrones (callbacks sur thread UI). */
 typedef struct {
     char addr[18];    /* MAC "AA:BB:CC:DD:EE:FF" */

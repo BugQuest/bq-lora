@@ -12,4 +12,6 @@ add_subdirectory(lvgl)
 
 file(GLOB APP_SRC ${CMAKE_CURRENT_SOURCE_DIR}/*.c)
 add_executable(meshui ${APP_SRC})
-target_link_libraries(meshui lvgl m pthread)
+# libzbar (apt: libzbar0 libzbar-dev) : décodage QR pour la conf WiFi.
+find_library(ZBAR_LIB zbar REQUIRED)
+target_link_libraries(meshui lvgl m pthread ${ZBAR_LIB})

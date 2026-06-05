@@ -552,6 +552,165 @@ void sys_cam_preview_async(const char *jpg_path, int w, int h,
     pthread_t t; pthread_create(&t, NULL, campv_thread, c); pthread_detach(t);
 }
 
+/* ---------- Camera : scanner QR (flux live + decode libzbar) ----------
+ * Reprend exactement la mecanique de sys_cam_stream_* (rpicam-vid YUV420
+ * dans un pipe, conversion vers RGB565 pour le canvas), mais a chaque frame
+ * le plan Y (greyscale natif) est passe a un zbar_image_scanner. A la
+ * premiere detection, on appelle on_hit() sur le thread UI avec le payload.
+ * Variables et pthread separes du flux camera 'normal' : les deux ne peuvent
+ * pas tourner en parallele (camera mono-acces) mais le code reste isole. */
+#include <zbar.h>
+static volatile int      qr_run;
+static pthread_t         qr_tid;
+static pid_t             qr_pid = -1;
+static int               qr_fd  = -1;
+static uint8_t          *qr_buf;
+static int               qr_w, qr_h;
+static cam_frame_cb_t    qr_frame_cb;
+static qr_hit_cb_t       qr_hit_cb;
+static void             *qr_user;
+static volatile int      qr_frame_pending;
+static volatile int      qr_hit_fired;
+static char              qr_hit_payload[512];
+
+static void qr_frame_deliver(void *unused)
+{
+    (void)unused;
+    qr_frame_pending = 0;
+    if (qr_frame_cb && qr_run) qr_frame_cb(qr_user);
+}
+
+static void qr_hit_deliver(void *unused)
+{
+    (void)unused;
+    if (qr_hit_cb) qr_hit_cb(qr_hit_payload, qr_user);
+}
+
+static void *qr_thread(void *a)
+{
+    (void)a;
+    int w = qr_w, h = qr_h;
+    size_t ysz = (size_t)w * h;
+    size_t csz = (size_t)(w / 2) * (h / 2);
+    size_t fsz = ysz + 2 * csz;
+    uint8_t *frame = malloc(fsz);
+    if (!frame) return NULL;
+
+    zbar_image_scanner_t *scanner = zbar_image_scanner_create();
+    /* on ne s'interesse qu'au QR : evite le bruit des codes-barres lineaires */
+    zbar_image_scanner_set_config(scanner, 0, ZBAR_CFG_ENABLE, 0);
+    zbar_image_scanner_set_config(scanner, ZBAR_QRCODE, ZBAR_CFG_ENABLE, 1);
+
+    int decimate = 0;       /* on ne scanne qu'une frame sur 2 pour soulager le CPU */
+
+    while (qr_run) {
+        int r = read_full(qr_fd, frame, fsz);
+        if (r <= 0) break;
+
+        /* conversion YUV420 -> RGB565 (identique a cam_stream_thread) */
+        const uint8_t *Y = frame;
+        const uint8_t *U = frame + ysz;
+        const uint8_t *V = U + csz;
+        uint16_t *out = (uint16_t *)qr_buf;
+        for (int y = 0; y < h; y++) {
+            const uint8_t *yr = Y + (size_t)y * w;
+            const uint8_t *ur = U + (size_t)(y / 2) * (w / 2);
+            const uint8_t *vr = V + (size_t)(y / 2) * (w / 2);
+            uint16_t      *orow = out + (size_t)y * w;
+            for (int x = 0; x < w; x++) {
+                int C = (int)yr[x] - 16;
+                int D = (int)ur[x >> 1] - 128;
+                int E = (int)vr[x >> 1] - 128;
+                uint8_t R = clamp8((298 * C + 409 * E + 128) >> 8);
+                uint8_t G = clamp8((298 * C - 100 * D - 208 * E + 128) >> 8);
+                uint8_t B = clamp8((298 * C + 516 * D + 128) >> 8);
+                orow[x] = (uint16_t)(((R & 0xF8) << 8) |
+                                     ((G & 0xFC) << 3) |
+                                     ( B >> 3));
+            }
+        }
+        if (!qr_frame_pending) {
+            qr_frame_pending = 1;
+            lv_async_call(qr_frame_deliver, NULL);
+        }
+
+        /* decode QR sur le plan Y (greyscale natif) -- une frame sur 2 */
+        if (!qr_hit_fired && (decimate++ & 1) == 0) {
+            zbar_image_t *img = zbar_image_create();
+            zbar_image_set_format(img, *(int *)"Y800");
+            zbar_image_set_size(img, w, h);
+            zbar_image_set_data(img, Y, ysz, NULL);
+            int n = zbar_scan_image(scanner, img);
+            if (n > 0) {
+                const zbar_symbol_t *s = zbar_image_first_symbol(img);
+                if (s) {
+                    const char *data = zbar_symbol_get_data(s);
+                    if (data && data[0]) {
+                        strncpy(qr_hit_payload, data, sizeof(qr_hit_payload) - 1);
+                        qr_hit_payload[sizeof(qr_hit_payload) - 1] = 0;
+                        qr_hit_fired = 1;
+                        lv_async_call(qr_hit_deliver, NULL);
+                    }
+                }
+            }
+            zbar_image_destroy(img);
+        }
+    }
+
+    zbar_image_scanner_destroy(scanner);
+    free(frame);
+    return NULL;
+}
+
+void sys_qr_start(uint8_t *buf, int w, int h,
+                  cam_frame_cb_t on_frame, qr_hit_cb_t on_hit, void *user)
+{
+    if (qr_run) return;
+    qr_buf = buf; qr_w = w; qr_h = h;
+    qr_frame_cb = on_frame; qr_hit_cb = on_hit; qr_user = user;
+    qr_frame_pending = 0; qr_hit_fired = 0; qr_hit_payload[0] = 0;
+
+    char ws[8], hs[8];
+    snprintf(ws, sizeof ws, "%d", w);
+    snprintf(hs, sizeof hs, "%d", h);
+
+    int fds[2];
+    if (pipe(fds) != 0) return;
+    pid_t pid = fork();
+    if (pid < 0) { close(fds[0]); close(fds[1]); return; }
+    if (pid == 0) {
+        dup2(fds[1], STDOUT_FILENO);
+        int dn = open("/dev/null", O_WRONLY);
+        if (dn >= 0) { dup2(dn, STDERR_FILENO); close(dn); }
+        close(fds[0]); close(fds[1]);
+        execlp("rpicam-vid", "rpicam-vid", "-n", "-t", "0",
+               "--framerate", "12", "--width", ws, "--height", hs,
+               "--codec", "yuv420", "--flush", "-o", "-", (char *)NULL);
+        _exit(127);
+    }
+    close(fds[1]);
+    qr_fd = fds[0]; qr_pid = pid; qr_run = 1;
+    if (pthread_create(&qr_tid, NULL, qr_thread, NULL) != 0) {
+        qr_run = 0;
+        kill(pid, SIGTERM); waitpid(pid, NULL, 0);
+        close(qr_fd); qr_fd = -1; qr_pid = -1;
+    }
+}
+
+void sys_qr_stop(void)
+{
+    if (!qr_run && qr_pid < 0) return;
+    qr_run = 0;
+    if (qr_pid > 0) kill(qr_pid, SIGTERM);
+    pthread_join(qr_tid, NULL);
+    if (qr_fd >= 0) { close(qr_fd); qr_fd = -1; }
+    if (qr_pid > 0) waitpid(qr_pid, NULL, 0);
+    qr_pid = -1;
+    lv_async_call_cancel(qr_frame_deliver, NULL);
+    lv_async_call_cancel(qr_hit_deliver, NULL);
+    qr_frame_pending = 0;
+}
+
 #define PWM_DUTY   "/sys/class/pwm/pwmchip0/pwm0/duty_cycle"
 #define PWM_PERIOD 1000000
 
@@ -783,6 +942,66 @@ void sys_wifi_connect_async(const char *ssid, const char *password,
     strncpy(c->ssid, ssid, sizeof(c->ssid) - 1);
     if (password) strncpy(c->pass, password, sizeof(c->pass) - 1);
     pthread_t t; pthread_create(&t, NULL, conn_thread, c); pthread_detach(t);
+}
+
+/* ---------- WPS push-button (PBC) ----------
+ * wpa_cli wps_pbc rend la main immediatement ("OK") apres avoir lance le scan
+ * WPS cote supplicant. On polle ensuite nmcli pour detecter l'apparition d'une
+ * connexion active sur wlan0 (timeout 120 s, valeur standard WPS). */
+static void wps_deliver(void *arg)
+{
+    conn_ctx_t *c = arg;
+    c->cb(c->ok, c->msg, c->user);
+    free(c);
+}
+
+static void *wps_thread(void *arg)
+{
+    conn_ctx_t *c = arg;
+
+    /* nom de la connexion active actuelle sur wlan0 (peut etre vide) */
+    char before[64] = "";
+    run_get("nmcli -t -f DEVICE,CONNECTION device status 2>/dev/null "
+            "| awk -F: '$1==\"wlan0\"{print $2}'", before, sizeof(before));
+
+    /* declenche WPS push-button */
+    FILE *p = popen(CTL " wifi-wps 2>&1", "r");
+    char buf[128] = "";
+    if (p) { fgets(buf, sizeof(buf), p); pclose(p); chomp(buf); }
+    if (strncmp(buf, "OK", 2) != 0) {
+        c->ok = false;
+        snprintf(c->msg, sizeof(c->msg),
+                 "wps_pbc echec : %s", buf[0] ? buf : "supplicant injoignable");
+        lv_async_call(wps_deliver, c);
+        return NULL;
+    }
+
+    /* attend qu'une connexion active autre que la precedente apparaisse */
+    char cur[64];
+    for (int i = 0; i < 120; i++) {                 /* ~120 s */
+        sleep(1);
+        cur[0] = 0;
+        run_get("nmcli -t -f DEVICE,STATE,CONNECTION device status 2>/dev/null "
+                "| awk -F: '$1==\"wlan0\" && $2==\"connected\"{print $3}'",
+                cur, sizeof(cur));
+        if (cur[0] && strcmp(cur, before) != 0) {
+            c->ok = true;
+            snprintf(c->msg, sizeof(c->msg), "connecte : %s", cur);
+            lv_async_call(wps_deliver, c);
+            return NULL;
+        }
+    }
+    c->ok = false;
+    snprintf(c->msg, sizeof(c->msg), "timeout WPS (120s)");
+    lv_async_call(wps_deliver, c);
+    return NULL;
+}
+
+void sys_wifi_wps_async(wifi_connect_cb_t cb, void *user)
+{
+    conn_ctx_t *c = calloc(1, sizeof(*c));
+    c->cb = cb; c->user = user;
+    pthread_t t; pthread_create(&t, NULL, wps_thread, c); pthread_detach(t);
 }
 
 /* ---------- Bluetooth (asynchrone, via pthread + lv_async_call) ---------- */
