@@ -405,16 +405,18 @@ static void build_chat(void) {
         lv_obj_center(l);
     }
 
-    /* bouton de gestion des canaux (⚙) en bout de rangée */
+    /* bouton de gestion des canaux (⚙) en bout de rangée — plus large pour
+     * etre facile a viser au doigt sur un ecran resistif */
     lv_obj_t *mgr = lv_button_create(chans);
-    lv_obj_set_size(mgr, 26, 22);
+    lv_obj_set_size(mgr, 48, 32);
     lv_obj_set_style_radius(mgr, 2, 0);
     lv_obj_set_style_shadow_width(mgr, 0, 0);
-    lv_obj_set_style_bg_opa(mgr, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(mgr, LV_OPA_20, 0);
+    lv_obj_set_style_bg_color(mgr, lv_color_hex(CY_AMBER), 0);
     lv_obj_set_style_border_width(mgr, 1, 0);
-    lv_obj_set_style_border_color(mgr, lv_color_hex(CY_BORDER), 0);
+    lv_obj_set_style_border_color(mgr, lv_color_hex(CY_AMBER), 0);
     lv_obj_add_event_cb(mgr, chanmgr_open_e, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *ml = label(mgr, LV_SYMBOL_SETTINGS, FONT_SMALL, CY_AMBER);
+    lv_obj_t *ml = label(mgr, LV_SYMBOL_SETTINGS, FONT_BODY, CY_AMBER);
     lv_obj_center(ml);
 
     /* liste des messages (défilante) */
@@ -1341,6 +1343,11 @@ static void settings_modal_open_e(lv_event_t *e) {
 static lv_obj_t *cm_name_ov, *cm_name_ta;   /* sous-modal saisie nom */
 static lv_obj_t *cm_imp_ov, *cm_imp_ta;     /* sous-modal import URL */
 static lv_obj_t *cm_share_ov;               /* sous-modal QR partage */
+static lv_obj_t *cm_qr_panel, *cm_qr_canvas, *cm_qr_status; /* scan QR */
+/* buffer separe du scanner WiFi -- meme format mais code modulaire */
+#define CM_QR_W 320
+#define CM_QR_H 240
+static uint8_t   cm_qr_buf[CM_QR_W * CM_QR_H * 2] __attribute__((aligned(4)));
 static int  cm_name_target = -1;            /* -1 = création, >=0 = renommage */
 static bool cm_name_enc;                     /* à la création : chiffré ? */
 static int  cm_del_target = -1;
@@ -1490,6 +1497,95 @@ static void cm_import_e(lv_event_t *e) {
     small_button(row, tr(STR_CHAN_IMPORT) + 1, CY_CYAN, cm_imp_ok_e); /* +1 saute l'espace en tete */
 }
 
+/* ---- scanner QR de canal (camera + libzbar via sys_qr_*) ----
+ * Reutilise toute l'infra QR : viseur 320x240 RGB565, decodage cote sys.c.
+ * A la detection on verifie que le payload ressemble a une URL Meshtastic
+ * (meshtastic.org/e/#) avant de la passer a mesh_channel_import_url. */
+static void cm_qr_close(void) {
+    sys_qr_stop();
+    if (cm_qr_panel) { lv_obj_delete(cm_qr_panel); cm_qr_panel = NULL; }
+    cm_qr_canvas = NULL; cm_qr_status = NULL;
+}
+static void cm_qr_close_e(lv_event_t *e) { (void)e; cm_qr_close(); }
+
+static void cm_qr_frame_cb(void *user) {
+    (void)user;
+    if (cm_qr_canvas) lv_obj_invalidate(cm_qr_canvas);
+}
+
+static bool cm_qr_is_meshtastic_url(const char *s) {
+    if (!s) return false;
+    /* tolerant : http/https et meshtastic.org/e/#... ou meshtastic.org/e/?... */
+    const char *p = strstr(s, "meshtastic.org/e/");
+    return p != NULL;
+}
+
+static void cm_qr_hit_cb(const char *payload, void *user) {
+    (void)user;
+    if (cm_qr_is_meshtastic_url(payload)) {
+        /* on ferme le scanner AVANT d'importer : import declenche un re-handshake
+         * (cm_rebuild_list refait la liste) et on veut etre revenu au modal */
+        char url[256]; snprintf(url, sizeof(url), "%s", payload);
+        cm_qr_close();
+        int n = mesh_channel_import_url(url);
+        if (n < 0)       confirm_dialog(tr(STR_URL_INVALID), NULL);
+        else if (n == 0) confirm_dialog(tr(STR_NO_CHANNEL_ADDED), NULL);
+        else             confirm_dialog(tr(STR_CHAN_ADDED), NULL);
+    } else if (cm_qr_status) {
+        lv_label_set_text(cm_qr_status, tr(STR_CHAN_QR_NOT_CHAN));
+        lv_obj_set_style_text_color(cm_qr_status, lv_color_hex(CY_AMBER), 0);
+    }
+}
+
+static void cm_qr_open_e(lv_event_t *e) {
+    (void)e;
+    if (cm_qr_panel) return;
+    cm_qr_panel = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(cm_qr_panel, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(cm_qr_panel, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_bg_opa(cm_qr_panel, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(cm_qr_panel, 0, 0);
+    lv_obj_set_style_radius(cm_qr_panel, 0, 0);
+    lv_obj_set_style_pad_all(cm_qr_panel, 6, 0);
+    lv_obj_clear_flag(cm_qr_panel, LV_OBJ_FLAG_SCROLLABLE);
+
+    {
+        char tt[40]; snprintf(tt, sizeof(tt), LV_SYMBOL_IMAGE "%s", tr(STR_CHAN_QR_TITLE));
+        lv_obj_t *tt_lbl = label(cm_qr_panel, tt, FONT_BODY, CY_AMBER);
+        lv_obj_align(tt_lbl, LV_ALIGN_TOP_MID, 0, 0);
+    }
+
+    lv_obj_t *frame = lv_obj_create(cm_qr_panel);
+    lv_obj_set_size(frame, CM_QR_W + 6, CM_QR_H + 6);
+    panel(frame, CY_BORDER);
+    lv_obj_set_style_pad_all(frame, 2, 0);
+    lv_obj_align(frame, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(frame, LV_OBJ_FLAG_SCROLLABLE);
+    cm_qr_canvas = lv_canvas_create(frame);
+    lv_canvas_set_buffer(cm_qr_canvas, cm_qr_buf, CM_QR_W, CM_QR_H,
+                         LV_COLOR_FORMAT_RGB565);
+    lv_obj_center(cm_qr_canvas);
+    lv_canvas_fill_bg(cm_qr_canvas, lv_color_black(), LV_OPA_COVER);
+
+    cm_qr_status = label(cm_qr_panel, tr(STR_CHAN_QR_HINT), FONT_SMALL, CY_DIM);
+    lv_obj_align(cm_qr_status, LV_ALIGN_BOTTOM_MID, 0, -40);
+
+    lv_obj_t *bb = lv_button_create(cm_qr_panel);
+    lv_obj_set_size(bb, 120, 32);
+    lv_obj_align(bb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_radius(bb, 2, 0);
+    lv_obj_set_style_bg_color(bb, lv_color_hex(CY_PANEL2), 0);
+    lv_obj_set_style_shadow_width(bb, 0, 0);
+    lv_obj_add_event_cb(bb, cm_qr_close_e, LV_EVENT_CLICKED, NULL);
+    {
+        char canc[24]; snprintf(canc, sizeof(canc), LV_SYMBOL_CLOSE "  %s", tr(STR_CANCEL));
+        lv_obj_t *bl = label(bb, canc, FONT_SMALL, CY_DIM);
+        lv_obj_center(bl);
+    }
+
+    sys_qr_start(cm_qr_buf, CM_QR_W, CM_QR_H, cm_qr_frame_cb, cm_qr_hit_cb, NULL);
+}
+
 /* ---- liste des canaux ---- */
 static void cm_rebuild_list(void) {
     if (!cm_list) return;
@@ -1538,6 +1634,10 @@ static void cm_rebuild_list(void) {
 
 static void cm_close_e(lv_event_t *e) {
     (void)e;
+    /* assure que le scanner camera est coupe si le panneau est encore actif */
+    sys_qr_stop();
+    if (cm_qr_panel) { lv_obj_delete(cm_qr_panel); cm_qr_panel = NULL; }
+    cm_qr_canvas = NULL; cm_qr_status = NULL;
     if (cm_ov) { lv_obj_delete(cm_ov); cm_ov = NULL; cm_list = NULL; }
 }
 
@@ -1584,10 +1684,12 @@ static void chanmgr_open_e(lv_event_t *e) {
     lv_obj_set_style_pad_column(r2, 6, 0);
     lv_obj_clear_flag(r2, LV_OBJ_FLAG_SCROLLABLE);
     {
-        char bi[32], bc[32];
+        char bi[32], bq[32], bc[32];
         snprintf(bi, sizeof(bi), LV_SYMBOL_DOWNLOAD "%s", tr(STR_CHAN_IMPORT));
+        snprintf(bq, sizeof(bq), LV_SYMBOL_IMAGE "%s",    tr(STR_CHAN_QR_BTN));
         snprintf(bc, sizeof(bc), LV_SYMBOL_CLOSE "%s",    tr(STR_CHAN_CLOSE));
         small_button(r2, bi, CY_AMBER, cm_import_e);
+        small_button(r2, bq, CY_GREEN, cm_qr_open_e);
         small_button(r2, bc, CY_DIM,   cm_close_e);
     }
 }

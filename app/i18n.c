@@ -185,6 +185,11 @@ static const char *FR[STR_COUNT] = {
     [STR_USB_MODE_KBD_ACTIVE] = "CLAVIER actif",
     [STR_USB_MODE_STORAGE_ACTIVE] = "STOCKAGE actif",
     [STR_USB_MODE_NET_ACTIVE] = "RESEAU actif",
+    [STR_CHAN_QR_BTN] = " QR",
+    [STR_CHAN_QR_TITLE] = "  SCAN QR CANAL",
+    [STR_CHAN_QR_HINT] = "Cadre un QR meshtastic.org/e/#...",
+    [STR_CHAN_QR_NOT_CHAN] = "QR non-canal, continue...",
+    [STR_CHAN_ADDED] = "Canal(aux) importe(s)",
 
     /* Sous-onglets SYSTEME */
     [STR_SYSTAB_SYSTEM] = "SYSTEME",
@@ -375,6 +380,11 @@ static const char *EN[STR_COUNT] = {
     [STR_USB_MODE_KBD_ACTIVE] = "KEYBOARD active",
     [STR_USB_MODE_STORAGE_ACTIVE] = "STORAGE active",
     [STR_USB_MODE_NET_ACTIVE] = "NETWORK active",
+    [STR_CHAN_QR_BTN] = " QR",
+    [STR_CHAN_QR_TITLE] = "  SCAN CHANNEL QR",
+    [STR_CHAN_QR_HINT] = "Frame a meshtastic.org/e/# QR...",
+    [STR_CHAN_QR_NOT_CHAN] = "non-channel QR, keep going...",
+    [STR_CHAN_ADDED] = "Channel(s) imported",
 
     /* SYSTEM sub-tabs */
     [STR_SYSTAB_SYSTEM] = "SYSTEM",
