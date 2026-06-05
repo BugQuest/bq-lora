@@ -15,6 +15,9 @@ static int  raw_x = 0, raw_y = 0;
 static bool pressed = false;
 static bool calib_mode = false;
 static bool have_cal = false;
+static bool sleep_mode = false;   /* écran en veille : toucher = réveil, pas de clic */
+static bool woke_flag = false;    /* un toucher a eu lieu pendant la veille */
+static bool suppress = false;     /* avale le contact en cours après réveil */
 
 /* Lissage : moyenne glissante des derniers échantillons bruts (doigt = bruité). */
 #define AVG_N 6
@@ -70,6 +73,21 @@ static void read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     LV_UNUSED(indev);
     poll_dev();
 
+    /* Veille : tout toucher réveille mais n'est PAS transmis à LVGL. */
+    if (sleep_mode) {
+        if (pressed) { woke_flag = true; suppress = true; }
+        data->point.x = 0;
+        data->point.y = 0;
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+    /* Après réveil : on avale le contact restant jusqu'au relâchement. */
+    if (suppress) {
+        if (!pressed) suppress = false;
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+
     int ax, ay;
     smoothed_raw(&ax, &ay);
     double x = cx[0] * ax + cx[1] * ay + cx[2];
@@ -93,6 +111,20 @@ void touch_set_affine(const double ncx[3], const double ncy[3])
 
 bool touch_have_cal(void) { return have_cal; }
 void touch_set_calib_mode(bool on) { calib_mode = on; }
+bool touch_calib_mode(void) { return calib_mode; }
+
+void touch_set_sleep(bool on)
+{
+    sleep_mode = on;
+    if (on) woke_flag = false;
+}
+
+bool touch_woke(void)
+{
+    bool w = woke_flag;
+    woke_flag = false;
+    return w;
+}
 
 void touch_save(void)
 {

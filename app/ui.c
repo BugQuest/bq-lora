@@ -511,6 +511,7 @@ static float       upd_disp;                       /* % affiché (lissé) */
 static lv_obj_t *sys_btn_usb_share, *sys_btn_usb_client;          /* USB > INTERNET */
 static lv_obj_t *sys_log_ta;
 static lv_obj_t *sys_bl_slider, *sys_bl_lbl;
+static lv_obj_t *sys_sleep_lbl;
 static lv_timer_t *sys_refresh_timer;
 
 static lv_obj_t *info_row(lv_obj_t *parent, const char *key) {
@@ -940,6 +941,31 @@ static void bl_slider_cb(lv_event_t *e) {
         lv_label_set_text(sys_bl_lbl, b);
     }
     sys_backlight_set(v);
+}
+
+/* Veille ecran : cycle parmi quelques delais d'inactivite. */
+static const int SLEEP_OPTS[] = { 0, 30, 60, 120, 300 };
+#define SLEEP_NOPTS ((int)(sizeof(SLEEP_OPTS) / sizeof(SLEEP_OPTS[0])))
+
+static void sleep_fmt(int s, char *out, size_t cap) {
+    if (s <= 0)        snprintf(out, cap, LV_SYMBOL_POWER "  Jamais");
+    else if (s < 60)   snprintf(out, cap, LV_SYMBOL_POWER "  %d s", s);
+    else if (s % 60 == 0) snprintf(out, cap, LV_SYMBOL_POWER "  %d min", s / 60);
+    else               snprintf(out, cap, LV_SYMBOL_POWER "  %d s", s);
+}
+
+static void sleep_cycle_cb(lv_event_t *e) {
+    (void)e;
+    int cur = settings_screen_timeout();
+    int idx = 0;
+    for (int i = 0; i < SLEEP_NOPTS; i++) if (SLEEP_OPTS[i] == cur) { idx = i; break; }
+    idx = (idx + 1) % SLEEP_NOPTS;
+    settings_set_screen_timeout(SLEEP_OPTS[idx]);
+    settings_save();
+    if (sys_sleep_lbl) {
+        char b[32]; sleep_fmt(SLEEP_OPTS[idx], b, sizeof(b));
+        lv_label_set_text(sys_sleep_lbl, b);
+    }
 }
 
 static void log_refresh(lv_obj_t *ta) {
@@ -1612,6 +1638,19 @@ static void build_sys(void) {
     small_button(erow, LV_SYMBOL_AUDIO "  BIP",         CY_MAGENTA, beep_cb);
     small_button(erow, LV_SYMBOL_GPS   "  CALIBRER",    CY_CYAN,    calib_cb);
 
+    /* Veille ecran : delai d'extinction (reveil au toucher) */
+    lv_obj_t *vrow = lv_obj_create(s);
+    lv_obj_set_size(vrow, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(vrow);
+    lv_obj_set_flex_flow(vrow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(vrow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(vrow, 6, 0);
+    lv_obj_clear_flag(vrow, LV_OBJ_FLAG_SCROLLABLE);
+    label(vrow, "veille ecran", FONT_SMALL, CY_DIM);
+    char vb[32]; sleep_fmt(settings_screen_timeout(), vb, sizeof(vb));
+    lv_obj_t *vbtn = small_button(vrow, vb, CY_AMBER, sleep_cycle_cb);
+    sys_sleep_lbl = lv_obj_get_child(vbtn, 0);
+
     /* Section LOG */
     s = section(col, "LOG SYSTEME");
     sys_log_ta = lv_textarea_create(s);
@@ -2016,7 +2055,7 @@ static void show_tab(int app) {
     upd_lbl_state = NULL; upd_lbl_hash = NULL; upd_btn_install = NULL;
     sys_btn_usb_share = NULL; sys_btn_usb_client = NULL;
     sys_log_ta = NULL;
-    sys_bl_slider = NULL; sys_bl_lbl = NULL;
+    sys_bl_slider = NULL; sys_bl_lbl = NULL; sys_sleep_lbl = NULL;
     /* le clavier peut avoir remonté la barre de saisie sur la couche top :
      * la replacer sous content pour qu'elle soit bien libérée par le clean */
     lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);

@@ -1,5 +1,6 @@
 #include "settings.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define CONFIG_PATH "/home/bq-lora/meshui/config.ini"
@@ -10,6 +11,7 @@ static char s_ssid[64]    = "BugQuest-Lora";
 static char s_pass[64]    = "bugquest-lora";
 static char s_tz[64]      = "Europe/Paris";
 static int  s_mesh_en     = 1;     /* 1 = l'UI se connecte a meshtasticd */
+static int  s_screen_to   = 0;     /* veille ecran : secondes, 0 = jamais */
 
 static void copy_in(char *dst, size_t cap, const char *src)
 {
@@ -40,6 +42,7 @@ void settings_load(void)
         else if (!strcmp(key, "hotspot_pass")) copy_in(s_pass, sizeof(s_pass), val);
         else if (!strcmp(key, "timezone"))     copy_in(s_tz,   sizeof(s_tz),   val);
         else if (!strcmp(key, "mesh_enabled")) s_mesh_en = (val[0] == '0') ? 0 : 1;
+        else if (!strcmp(key, "screen_timeout")) s_screen_to = atoi(val);
     }
     fclose(f);
 }
@@ -54,6 +57,7 @@ void settings_save(void)
     fprintf(f, "hotspot_pass=%s\n", s_pass);
     fprintf(f, "timezone=%s\n",     s_tz);
     fprintf(f, "mesh_enabled=%d\n", s_mesh_en);
+    fprintf(f, "screen_timeout=%d\n", s_screen_to);
     fclose(f);
 }
 
@@ -62,9 +66,11 @@ const char *settings_hotspot_ssid(void) { return s_ssid; }
 const char *settings_hotspot_pass(void) { return s_pass; }
 const char *settings_timezone(void)     { return s_tz; }
 bool        settings_mesh_enabled(void)  { return s_mesh_en != 0; }
+int         settings_screen_timeout(void) { return s_screen_to; }
 
 void settings_set_node_name(const char *v)    { copy_in(s_node, sizeof(s_node), v); }
 void settings_set_hotspot_ssid(const char *v) { copy_in(s_ssid, sizeof(s_ssid), v); }
 void settings_set_hotspot_pass(const char *v) { copy_in(s_pass, sizeof(s_pass), v); }
 void settings_set_timezone(const char *v)     { copy_in(s_tz,   sizeof(s_tz),   v); }
 void settings_set_mesh_enabled(bool v)        { s_mesh_en = v ? 1 : 0; }
+void settings_set_screen_timeout(int s)       { s_screen_to = (s < 0) ? 0 : s; }

@@ -17,6 +17,13 @@ void touch_set_calib_mode(bool on);
 /* Applique une nouvelle affine : sx = cx[0]*rx + cx[1]*ry + cx[2] (idem cy). */
 void touch_set_affine(const double cx[3], const double cy[3]);
 
+/* Mode veille : avale le toucher de réveil (pas de clic accidentel à l'allumage). */
+void touch_set_sleep(bool on);
+/* true (et remet à false) si un toucher a eu lieu pendant la veille. */
+bool touch_woke(void);
+/* true si on est en mode calibrage (le power-save doit alors être inhibé). */
+bool touch_calib_mode(void);
+
 bool touch_have_cal(void);                     /* true si une calibration est chargée */
 void touch_save(void);                         /* persiste l'affine sur disque */
 void touch_load(void);                         /* charge l'affine depuis le disque */
