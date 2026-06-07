@@ -35,6 +35,16 @@ progress 85
 
 # Reinstalle les artefacts deploy/ s'ils ont change
 install -m 755 deploy/bq-lora-ui-ctl                /usr/local/sbin/bq-lora-ui-ctl
+# Sudoers NOPASSWD pour bq-lora-ui-ctl (sinon reboot/poweroff/restart depuis
+# l'UI demandent un mot de passe -> echec silencieux). Verifie la syntaxe
+# avant d'ecraser le fichier sudoers en place.
+install -m 440 -o root -g root deploy/bq-lora-ui-sudoers /etc/sudoers.d/bq-lora-ui.tmp
+if visudo -c -f /etc/sudoers.d/bq-lora-ui.tmp >/dev/null 2>&1; then
+    mv /etc/sudoers.d/bq-lora-ui.tmp /etc/sudoers.d/bq-lora-ui
+else
+    rm -f /etc/sudoers.d/bq-lora-ui.tmp
+    echo "!! sudoers bq-lora-ui invalide, conserve l'ancien"
+fi
 install -m 755 deploy/usb-ncm-setup.sh          /usr/local/sbin/bq-lora-ui-usb-gadget
 install -m 755 deploy/usb-hid-setup.sh          /usr/local/sbin/bq-lora-ui-usb-hid
 install -m 755 deploy/usb-storage-setup.sh      /usr/local/sbin/bq-lora-ui-usb-storage
