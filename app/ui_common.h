@@ -15,6 +15,30 @@
 #include "i18n.h"
 #include "config.h"
 #include <stdint.h>
+#include <stdbool.h>
+
+/* IDs d'app (cur_tab garde son nom mais semantique = app courante) */
+enum {
+    APP_HOME    = 0,
+    APP_CHAT    = 1,
+    APP_NODES   = 2,
+    APP_SYS     = 3,
+    APP_WIFI    = 4,
+    APP_HOTSPOT = 5,
+    APP_BADUSB  = 6,
+    APP_BT      = 7,
+    APP_ABOUT   = 8,
+    APP_CAMERA  = 9,
+    APP_GALLERY = 10,
+};
+
+extern int       cur_tab;          /* app courante (cf. enum APP_*) */
+
+/* Etat CHAT partage avec HOME (badge non-lus du hub). Definis dans ui_chat.c. */
+#define UI_MAX_CHANS 8
+extern uint8_t   cur_chan;         /* canal courant (vue CHAT) */
+extern unsigned  msg_seen;         /* compteur "lu" global (badge HOME) */
+extern unsigned  msg_seen_ch[UI_MAX_CHANS];  /* compteurs "lu" par canal */
 
 /* Clavier virtuel partage entre tous les modals/views qui prennent du texte. */
 extern lv_obj_t *kb;
