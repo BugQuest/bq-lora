@@ -55,6 +55,13 @@ typedef struct {
     uint32_t    last_heard; /* epoch du dernier contact */
     uint32_t    first_heard;/* epoch du premier contact (persisté) */
     int8_t      best_snr;   /* meilleur SNR vu, INT8_MIN = inconnu (persisté) */
+    /* Historique SNR/RSSI : ring buffer, hist_len echantillons valides,
+     * hist_head pointe sur la prochaine case a ecrire (= position du PLUS
+     * ancien quand le buffer est plein). */
+    int8_t      hist_snr [MESH_HIST_LEN];
+    int16_t     hist_rssi[MESH_HIST_LEN];
+    uint8_t     hist_len;
+    uint8_t     hist_head;
 } node_slot_t;
 
 typedef struct {
@@ -339,6 +346,33 @@ static void node_update_signal(uint32_t num, bool have_snr, float snr, int rssi)
     if (rssi)     s->pub.rssi = (int16_t)rssi;
     s->last_heard = (uint32_t)time(NULL);
     s_nodes_save_pending = true;
+
+    /* Ring buffer SNR/RSSI : ecrit a hist_head, avance, sature a MESH_HIST_LEN. */
+    if (have_snr || rssi) {
+        s->hist_snr [s->hist_head] = s->pub.snr;
+        s->hist_rssi[s->hist_head] = s->pub.rssi;
+        s->hist_head = (s->hist_head + 1) % MESH_HIST_LEN;
+        if (s->hist_len < MESH_HIST_LEN) s->hist_len++;
+    }
+}
+
+int mesh_node_history(uint32_t num, int8_t *out_snr, int16_t *out_rssi)
+{
+    for (int i = 0; i < s_node_count; i++) {
+        node_slot_t *s = &s_nodes[i];
+        if (s->num != num) continue;
+        int n = s->hist_len;
+        if (n == 0) return 0;
+        /* tail = position du plus ancien : si plein -> hist_head, sinon 0 */
+        int tail = (n == MESH_HIST_LEN) ? s->hist_head : 0;
+        for (int k = 0; k < n; k++) {
+            int idx = (tail + k) % MESH_HIST_LEN;
+            if (out_snr)  out_snr [k] = s->hist_snr [idx];
+            if (out_rssi) out_rssi[k] = s->hist_rssi[idx];
+        }
+        return n;
+    }
+    return 0;
 }
 
 /* ----------------------------------------------------------------- channels */

@@ -86,6 +86,12 @@ bool mesh_set_owner(const char *long_name, const char *short_name);
 int                 mesh_node_count(void);
 const mesh_node_t  *mesh_node(int i);
 
+/* Historique SNR/RSSI par nœud (ring buffer, plus recent en derniere position).
+ * Renvoie le nombre d'echantillons valides (au plus MESH_HIST_LEN). Les arrays
+ * out_snr / out_rssi doivent etre dimensionnes a MESH_HIST_LEN. */
+#define MESH_HIST_LEN 60
+int                 mesh_node_history(uint32_t num, int8_t *out_snr, int16_t *out_rssi);
+
 int                 mesh_message_count(uint8_t ch);
 const mesh_message_t *mesh_message(uint8_t ch, int idx);
 

@@ -190,6 +190,11 @@ static const char *FR[STR_COUNT] = {
     [STR_CHAN_QR_HINT] = "Cadre un QR meshtastic.org/e/#...",
     [STR_CHAN_QR_NOT_CHAN] = "QR non-canal, continue...",
     [STR_CHAN_ADDED] = "Canal(aux) importe(s)",
+    [STR_TX_THROTTLED] = "Air-time > 10%%, attendez (regle ETSI EU868)",
+    [STR_NODE_HIST_TITLE] = "Historique SNR (dB)",
+    [STR_NODE_DM_HINT] = "Message direct (DM)...",
+    [STR_NODE_DM_SEND] = "ENVOYER DM",
+    [STR_NODE_NO_HIST] = "Pas encore d'historique",
 
     /* Sous-onglets SYSTEME */
     [STR_SYSTAB_SYSTEM] = "SYSTEME",
@@ -385,6 +390,11 @@ static const char *EN[STR_COUNT] = {
     [STR_CHAN_QR_HINT] = "Frame a meshtastic.org/e/# QR...",
     [STR_CHAN_QR_NOT_CHAN] = "non-channel QR, keep going...",
     [STR_CHAN_ADDED] = "Channel(s) imported",
+    [STR_TX_THROTTLED] = "Air-time > 10%%, wait (ETSI EU868 cap)",
+    [STR_NODE_HIST_TITLE] = "SNR history (dB)",
+    [STR_NODE_DM_HINT] = "Direct message (DM)...",
+    [STR_NODE_DM_SEND] = "SEND DM",
+    [STR_NODE_NO_HIST] = "No history yet",
 
     /* SYSTEM sub-tabs */
     [STR_SYSTAB_SYSTEM] = "SYSTEM",

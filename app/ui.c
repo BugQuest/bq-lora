@@ -425,11 +425,17 @@ static void chan_cb(lv_event_t *e) {
 static void send_cb(lv_event_t *e) {
     (void)e;
     const char *txt = lv_textarea_get_text(compose_ta);
-    if (txt && txt[0]) {
-        mesh_send(cur_chan, txt);
-        lv_textarea_set_text(compose_ta, "");
-        rebuild_messages();
+    if (!txt || !txt[0]) return;
+    /* Throttle TX : refuse l'envoi si l'air-time depasse 10% (regle ETSI EU868
+     * 1% duty cycle, on prend 10% comme garde-fou applicatif). */
+    const mesh_self_t *sf = mesh_self();
+    if (sf && sf->air_tx > 10.0f) {
+        confirm_dialog(tr(STR_TX_THROTTLED), NULL);
+        return;
     }
+    mesh_send(cur_chan, txt);
+    lv_textarea_set_text(compose_ta, "");
+    rebuild_messages();
 }
 
 static void ta_cb(lv_event_t *e) {
@@ -604,6 +610,136 @@ static node_row_t *node_row_find(uint32_t num) {
     return NULL;
 }
 
+/* ---- Modal "details du node" : stats + sparkline SNR + compose DM ----
+ * S'ouvre en tapant sur une ligne de la vue NODES. Reutilise mesh_node_history
+ * pour le ring buffer SNR. Le bouton ENVOYER DM appelle mesh_send_dm avec le
+ * num du node selectionne. */
+static lv_obj_t *nd_ov, *nd_dm_ta;
+static uint32_t  nd_target_num;
+static const mesh_node_t *nd_find(uint32_t num) {
+    int n = mesh_node_count();
+    for (int i = 0; i < n; i++) {
+        const mesh_node_t *m = mesh_node(i);
+        if (m && m->num == num) return m;
+    }
+    return NULL;
+}
+static void nd_close(void) {
+    if (nd_ov) { lv_obj_delete(nd_ov); nd_ov = NULL; }
+    nd_dm_ta = NULL;
+    lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+}
+static void nd_close_e(lv_event_t *e) { (void)e; nd_close(); }
+static void nd_dm_ta_e(lv_event_t *e) {
+    (void)e;
+    lv_keyboard_set_textarea(kb, nd_dm_ta);
+    lv_obj_clear_flag(kb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(kb);
+}
+static void nd_send_e(lv_event_t *e) {
+    (void)e;
+    if (!nd_dm_ta) return;
+    const char *txt = lv_textarea_get_text(nd_dm_ta);
+    if (!txt || !txt[0]) return;
+    const mesh_self_t *sf = mesh_self();
+    if (sf && sf->air_tx > 10.0f) {
+        confirm_dialog(tr(STR_TX_THROTTLED), NULL);
+        return;
+    }
+    mesh_send_dm(nd_target_num, txt);
+    nd_close();
+}
+
+static void node_detail_open(uint32_t num)
+{
+    const mesh_node_t *n = nd_find(num);
+    if (!n) return;
+    nd_target_num = num;
+
+    nd_ov = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(nd_ov, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(nd_ov, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_bg_opa(nd_ov, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(nd_ov, 0, 0);
+    lv_obj_set_style_radius(nd_ov, 0, 0);
+    lv_obj_set_style_pad_all(nd_ov, 8, 0);
+    lv_obj_clear_flag(nd_ov, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(nd_ov, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(nd_ov, 4, 0);
+
+    /* en-tete : nom + id */
+    char hdr[80]; snprintf(hdr, sizeof(hdr), "%s  %s%s",
+                          n->name, n->id, n->self ? "  (VOUS)" : "");
+    label(nd_ov, hdr, FONT_BIG, n->self ? CY_CYAN : CY_TEXT);
+
+    /* stats */
+    char best[12]; if (n->best_snr == -128) snprintf(best, sizeof(best), "-");
+                   else snprintf(best, sizeof(best), "%d", n->best_snr);
+    char stat[160];
+    snprintf(stat, sizeof(stat),
+             "SNR %d dB (max %s)  RSSI %d dBm\n%s%d%%  %dhop  vu %s",
+             n->snr, best, n->rssi, LV_SYMBOL_CHARGE, n->batt, n->hops, n->last);
+    label(nd_ov, stat, FONT_SMALL, CY_DIM);
+
+    /* sparkline SNR (LVGL chart) */
+    label(nd_ov, tr(STR_NODE_HIST_TITLE), FONT_SMALL, CY_AMBER);
+    int8_t hs[MESH_HIST_LEN];
+    int hlen = mesh_node_history(num, hs, NULL);
+    if (hlen <= 0) {
+        label(nd_ov, tr(STR_NODE_NO_HIST), FONT_SMALL, CY_DIM);
+    } else {
+        lv_obj_t *chart = lv_chart_create(nd_ov);
+        lv_obj_set_size(chart, LV_PCT(100), 90);
+        lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
+        lv_chart_set_point_count(chart, hlen);
+        /* range auto : min..max des echantillons +/-2 */
+        int mn = hs[0], mx = hs[0];
+        for (int i = 1; i < hlen; i++) {
+            if (hs[i] < mn) mn = hs[i];
+            if (hs[i] > mx) mx = hs[i];
+        }
+        if (mn == mx) { mn -= 2; mx += 2; }
+        lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, mn - 1, mx + 1);
+        lv_obj_set_style_bg_color(chart, lv_color_hex(CY_PANEL2), 0);
+        lv_obj_set_style_border_color(chart, lv_color_hex(CY_BORDER), 0);
+        lv_obj_set_style_size(chart, 2, 2, LV_PART_INDICATOR);
+        lv_chart_series_t *ser = lv_chart_add_series(chart,
+            lv_color_hex(CY_CYAN), LV_CHART_AXIS_PRIMARY_Y);
+        for (int i = 0; i < hlen; i++)
+            lv_chart_set_next_value(chart, ser, hs[i]);
+    }
+
+    /* compose DM */
+    if (!n->self) {
+        nd_dm_ta = lv_textarea_create(nd_ov);
+        lv_textarea_set_one_line(nd_dm_ta, true);
+        lv_textarea_set_placeholder_text(nd_dm_ta, tr(STR_NODE_DM_HINT));
+        lv_obj_set_size(nd_dm_ta, LV_PCT(100), 34);
+        lv_obj_set_style_bg_color(nd_dm_ta, lv_color_hex(CY_PANEL2), 0);
+        lv_obj_set_style_text_color(nd_dm_ta, lv_color_hex(CY_TEXT), 0);
+        lv_obj_set_style_text_font(nd_dm_ta, FONT_BODY, 0);
+        lv_obj_set_style_border_color(nd_dm_ta, lv_color_hex(CY_BORDER), 0);
+        lv_obj_set_style_border_width(nd_dm_ta, 1, 0);
+        lv_obj_set_style_radius(nd_dm_ta, 2, 0);
+        lv_obj_add_event_cb(nd_dm_ta, nd_dm_ta_e, LV_EVENT_CLICKED, NULL);
+    }
+
+    /* barre boutons */
+    lv_obj_t *row = lv_obj_create(nd_ov);
+    lv_obj_set_size(row, LV_PCT(100), 38);
+    flat(row); lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, 8, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(row, tr(STR_CLOSE), CY_DIM, nd_close_e);
+    if (!n->self)
+        small_button(row, tr(STR_NODE_DM_SEND), CY_CYAN, nd_send_e);
+}
+
+static void node_row_click_e(lv_event_t *e) {
+    uint32_t num = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
+    node_detail_open(num);
+}
+
 static node_row_t *node_row_create(uint32_t num) {
     if (s_nrow_count >= NODE_ROW_MAX || !nodes_list) return NULL;
     node_row_t *r = &s_nrows[s_nrow_count++];
@@ -613,6 +749,8 @@ static node_row_t *node_row_create(uint32_t num) {
     lv_obj_set_size(r->row, LV_PCT(100), LV_SIZE_CONTENT);
     panel(r->row, CY_BORDER);
     lv_obj_clear_flag(r->row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(r->row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(r->row, node_row_click_e, LV_EVENT_CLICKED, (void *)(uintptr_t)num);
     r->name_lbl = label(r->row, "", FONT_BODY, CY_TEXT);
     lv_obj_align(r->name_lbl, LV_ALIGN_TOP_LEFT, 0, 0);
     r->right_lbl = label(r->row, "", FONT_SMALL, CY_DIM);
