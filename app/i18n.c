@@ -201,6 +201,10 @@ static const char *FR[STR_COUNT] = {
     [STR_AUDIO_MORSE_HINT] = "Texte a jouer en Morse...",
     [STR_AUDIO_PLAY] = " JOUER",
     [STR_AUDIO_SOS] = " SOS",
+    [STR_TREE_BTN] = " ARBRE",
+    [STR_TREE_TITLE] = "Topologie mesh (par sauts)",
+    [STR_TREE_HOPS_FMT] = "%d sauts (%d nodes)",
+    [STR_TREE_DIRECT] = "Direct (%d nodes)",
 
     /* Sous-onglets SYSTEME */
     [STR_SYSTAB_SYSTEM] = "SYSTEME",
@@ -407,6 +411,10 @@ static const char *EN[STR_COUNT] = {
     [STR_AUDIO_MORSE_HINT] = "Text to play in Morse...",
     [STR_AUDIO_PLAY] = " PLAY",
     [STR_AUDIO_SOS] = " SOS",
+    [STR_TREE_BTN] = " TREE",
+    [STR_TREE_TITLE] = "Mesh topology (by hops)",
+    [STR_TREE_HOPS_FMT] = "%d hops (%d nodes)",
+    [STR_TREE_DIRECT] = "Direct (%d nodes)",
 
     /* SYSTEM sub-tabs */
     [STR_SYSTAB_SYSTEM] = "SYSTEM",

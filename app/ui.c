@@ -846,6 +846,87 @@ static void nodes_sort_cb(lv_event_t *e) {
     nodes_sync();
 }
 
+/* ---- Modal "Arbre" : visualisation simple par nombre de sauts ----
+ * Liste tous les nodes regroupes par hop count (0=direct, 1, 2, ...). Donne
+ * une vue rapide de la topologie sans avoir besoin de tracer le routage
+ * complet (les paquets Meshtastic ne portent que hop_start - hop_limit, pas
+ * la liste des nodes intermediaires). */
+static lv_obj_t *tree_ov;
+static void tree_close_e(lv_event_t *e) { (void)e; if (tree_ov) { lv_obj_delete(tree_ov); tree_ov = NULL; } }
+
+static void nodes_tree_open_e(lv_event_t *e) {
+    (void)e;
+    tree_ov = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(tree_ov, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(tree_ov, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_bg_opa(tree_ov, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(tree_ov, 0, 0);
+    lv_obj_set_style_radius(tree_ov, 0, 0);
+    lv_obj_set_style_pad_all(tree_ov, 8, 0);
+    lv_obj_clear_flag(tree_ov, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(tree_ov, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(tree_ov, 5, 0);
+
+    label(tree_ov, tr(STR_TREE_TITLE), FONT_BIG, CY_AMBER);
+
+    /* Regroupe les nodes par hop count. On limite a 6 niveaux d'ordinaire. */
+    #define TREE_MAX_HOPS 6
+    int by_hop[TREE_MAX_HOPS + 1] = {0};
+    int n = mesh_node_count();
+    for (int i = 0; i < n; i++) {
+        const mesh_node_t *m = mesh_node(i);
+        if (!m || m->self) continue;
+        int h = m->hops;
+        if (h < 0) h = 0;
+        if (h > TREE_MAX_HOPS) h = TREE_MAX_HOPS;
+        by_hop[h]++;
+    }
+
+    lv_obj_t *list = lv_obj_create(tree_ov);
+    lv_obj_set_width(list, LV_PCT(100));
+    lv_obj_set_flex_grow(list, 1);
+    flat(list);
+    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(list, 4, 0);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+
+    for (int h = 0; h <= TREE_MAX_HOPS; h++) {
+        if (by_hop[h] == 0) continue;
+        lv_obj_t *card = lv_obj_create(list);
+        lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
+        panel(card, h == 0 ? CY_GREEN : (h <= 2 ? CY_CYAN : CY_AMBER));
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(card, 2, 0);
+
+        char hdr[40];
+        if (h == 0) snprintf(hdr, sizeof(hdr), tr(STR_TREE_DIRECT), by_hop[h]);
+        else        snprintf(hdr, sizeof(hdr), tr(STR_TREE_HOPS_FMT), h, by_hop[h]);
+        label(card, hdr, FONT_BODY, h == 0 ? CY_GREEN : (h <= 2 ? CY_CYAN : CY_AMBER));
+
+        /* liste des noms du palier (max 200 chars total pour ne pas exploser) */
+        char names[256]; size_t pos = 0; names[0] = 0;
+        for (int i = 0; i < n && pos < sizeof(names) - 16; i++) {
+            const mesh_node_t *m = mesh_node(i);
+            if (!m || m->self) continue;
+            int mh = m->hops; if (mh < 0) mh = 0; if (mh > TREE_MAX_HOPS) mh = TREE_MAX_HOPS;
+            if (mh != h) continue;
+            pos += (size_t)snprintf(names + pos, sizeof(names) - pos,
+                                    "%s%s", pos ? ", " : "", m->name);
+        }
+        lv_obj_t *l = label(card, names, FONT_SMALL, CY_DIM);
+        lv_obj_set_width(l, LV_PCT(100));
+        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    }
+
+    lv_obj_t *bar = lv_obj_create(tree_ov);
+    lv_obj_set_size(bar, LV_PCT(100), 38);
+    flat(bar);
+    lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+    small_button(bar, tr(STR_CLOSE), CY_DIM, tree_close_e);
+}
+
 static void build_nodes(void) {
     s_nrow_count = 0;        /* anciennes lignes détruites par lv_obj_clean(content) */
     nodes_list = NULL;
@@ -858,7 +939,15 @@ static void build_nodes(void) {
     lv_obj_set_style_pad_all(hdr, 5, 0);
     lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(hdr, 4, 0);
-    lv_obj_t *btn = lv_button_create(hdr);
+    /* rangee boutons : TRI + ARBRE (topologie mesh par sauts) */
+    lv_obj_t *brow = lv_obj_create(hdr);
+    lv_obj_set_size(brow, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(brow);
+    lv_obj_set_flex_flow(brow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(brow, 6, 0);
+    lv_obj_clear_flag(brow, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *btn = lv_button_create(brow);
     lv_obj_set_size(btn, 150, 28);
     lv_obj_set_style_radius(btn, 2, 0);
     lv_obj_set_style_bg_color(btn, lv_color_hex(CY_PANEL2), 0);
@@ -870,6 +959,18 @@ static void build_nodes(void) {
         nodes_sort_lbl = label(btn, b, FONT_SMALL, CY_CYAN);
     }
     lv_obj_center(nodes_sort_lbl);
+
+    lv_obj_t *tbtn = lv_button_create(brow);
+    lv_obj_set_size(tbtn, 110, 28);
+    lv_obj_set_style_radius(tbtn, 2, 0);
+    lv_obj_set_style_bg_color(tbtn, lv_color_hex(CY_PANEL2), 0);
+    lv_obj_set_style_shadow_width(tbtn, 0, 0);
+    lv_obj_add_event_cb(tbtn, nodes_tree_open_e, LV_EVENT_CLICKED, NULL);
+    {
+        char b[24]; snprintf(b, sizeof(b), LV_SYMBOL_LIST "%s", tr(STR_TREE_BTN));
+        lv_obj_t *tl = label(tbtn, b, FONT_SMALL, CY_AMBER);
+        lv_obj_center(tl);
+    }
 
     nodes_radio_lbl = label(hdr, "", FONT_SMALL, CY_DIM);
 
