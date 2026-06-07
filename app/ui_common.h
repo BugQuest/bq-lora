@@ -27,3 +27,11 @@ lv_obj_t      *small_button(lv_obj_t *parent, const char *txt, uint32_t color, l
 
 /* Modale de confirmation OUI/NON. on_yes peut etre NULL (informatif seul). */
 void           confirm_dialog(const char *msg, void (*on_yes)(void));
+
+/* Champ de saisie label + textarea avec ouverture du clavier au tap.
+ * pwd=true active le masquage des caracteres. */
+lv_obj_t      *settings_field(lv_obj_t *parent, const char *key, const char *val, bool pwd);
+
+/* Handler interne utilise par settings_field (expose pour permettre a un module
+ * separe d'attacher ce focus a son propre textarea s'il en cree un a la main). */
+void           set_ta_focus_e(lv_event_t *e);
