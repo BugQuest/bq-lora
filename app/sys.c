@@ -767,6 +767,26 @@ void sys_beep(int freq_hz, int duration_ms)
     system(cmd);
 }
 
+void sys_morse(const char *text)
+{
+    if (!text || !text[0]) return;
+    /* echappe les guillemets simples / shell-meta : le texte est entre 'quotes' */
+    char esc[256]; size_t k = 0;
+    for (const char *p = text; *p && k < sizeof(esc) - 8; p++) {
+        if (*p == '\'') {
+            /* ferme la quote, insere \', rouvre */
+            if (k + 4 >= sizeof(esc)) break;
+            esc[k++] = '\''; esc[k++] = '\\'; esc[k++] = '\''; esc[k++] = '\'';
+        } else esc[k++] = *p;
+    }
+    esc[k] = 0;
+    char cmd[480];
+    snprintf(cmd, sizeof(cmd),
+             "/usr/bin/python3 /home/bq-lora/bq-lora-ui/tools/beep.py morse '%s' >/dev/null 2>&1 &",
+             esc);
+    system(cmd);
+}
+
 #define REPO "/home/bq-lora/bq-lora-ui"
 
 typedef struct {

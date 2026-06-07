@@ -195,6 +195,12 @@ static const char *FR[STR_COUNT] = {
     [STR_NODE_DM_HINT] = "Message direct (DM)...",
     [STR_NODE_DM_SEND] = "ENVOYER DM",
     [STR_NODE_NO_HIST] = "Pas encore d'historique",
+    [STR_AUDIO_TITLE] = "AUDIO",
+    [STR_AUDIO_PIANO] = "Piano",
+    [STR_AUDIO_MORSE] = "Morse",
+    [STR_AUDIO_MORSE_HINT] = "Texte a jouer en Morse...",
+    [STR_AUDIO_PLAY] = " JOUER",
+    [STR_AUDIO_SOS] = " SOS",
 
     /* Sous-onglets SYSTEME */
     [STR_SYSTAB_SYSTEM] = "SYSTEME",
@@ -395,6 +401,12 @@ static const char *EN[STR_COUNT] = {
     [STR_NODE_DM_HINT] = "Direct message (DM)...",
     [STR_NODE_DM_SEND] = "SEND DM",
     [STR_NODE_NO_HIST] = "No history yet",
+    [STR_AUDIO_TITLE] = "AUDIO",
+    [STR_AUDIO_PIANO] = "Piano",
+    [STR_AUDIO_MORSE] = "Morse",
+    [STR_AUDIO_MORSE_HINT] = "Text to play in Morse...",
+    [STR_AUDIO_PLAY] = " PLAY",
+    [STR_AUDIO_SOS] = " SOS",
 
     /* SYSTEM sub-tabs */
     [STR_SYSTAB_SYSTEM] = "SYSTEM",

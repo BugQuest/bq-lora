@@ -113,6 +113,10 @@ void sys_backlight_set(int pct);
 /* Beep court sur le piezo GPIO17 (asynchrone). */
 void sys_beep(int freq_hz, int duration_ms);
 
+/* Joue le texte en Morse sur le buzzer (asynchrone, 18 wpm par defaut, 700 Hz).
+ * Caracteres supportes : A-Z 0-9 .,?/-=+@. Espaces = inter-mot. */
+void sys_morse(const char *text);
+
 /* Dernières lignes du journal système (journalctl -n N). */
 void sys_log_tail(char *out, int cap, int n_lines);
 
