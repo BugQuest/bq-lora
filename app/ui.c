@@ -6,6 +6,8 @@
 #include "sys.h"
 #include "settings.h"
 #include "i18n.h"
+#include "config.h"
+#include "bme280.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -1768,12 +1770,15 @@ static void chanmgr_open_e(lv_event_t *e) {
     lv_obj_set_style_pad_column(r2, 6, 0);
     lv_obj_clear_flag(r2, LV_OBJ_FLAG_SCROLLABLE);
     {
-        char bi[32], bq[32], bc[32];
+        char bi[32], bc[32];
         snprintf(bi, sizeof(bi), LV_SYMBOL_DOWNLOAD "%s", tr(STR_CHAN_IMPORT));
-        snprintf(bq, sizeof(bq), LV_SYMBOL_IMAGE "%s",    tr(STR_CHAN_QR_BTN));
         snprintf(bc, sizeof(bc), LV_SYMBOL_CLOSE "%s",    tr(STR_CHAN_CLOSE));
         small_button(r2, bi, CY_AMBER, cm_import_e);
+#if CFG_WIFI_QR
+        char bq[32];
+        snprintf(bq, sizeof(bq), LV_SYMBOL_IMAGE "%s",    tr(STR_CHAN_QR_BTN));
         small_button(r2, bq, CY_GREEN, cm_qr_open_e);
+#endif
         small_button(r2, bc, CY_DIM,   cm_close_e);
     }
 }
@@ -2229,23 +2234,31 @@ static lv_obj_t *wifi_ov, *wifi_list_ov, *wifi_status, *wifi_pwd_panel, *wifi_pw
 static char wifi_pending_ssid[64];
 
 /* ----- mode QR (scanner WiFi par code) ----- */
+#if CFG_WIFI_QR
 #define WIFI_QR_W 320
 #define WIFI_QR_H 240
 static uint8_t  wifi_qr_buf[WIFI_QR_W * WIFI_QR_H * 2] __attribute__((aligned(4)));
 static lv_obj_t *wifi_qr_panel, *wifi_qr_canvas, *wifi_qr_status;
+#endif
 
 /* ----- mode WPS ----- */
+#if CFG_WPS
 static lv_obj_t *wifi_wps_panel, *wifi_wps_status;
 static lv_timer_t *wifi_wps_timer;
 static int       wifi_wps_remaining;       /* secondes restantes affichees */
+#endif
 
 static void wifi_modal_close_e(lv_event_t *e) {
     (void)e;
     /* arrete proprement le flux camera / timer WPS si actifs sous la modal */
+#if CFG_WIFI_QR
     sys_qr_stop();
-    if (wifi_wps_timer) { lv_timer_delete(wifi_wps_timer); wifi_wps_timer = NULL; }
     wifi_qr_canvas = NULL; wifi_qr_status = NULL; wifi_qr_panel = NULL;
+#endif
+#if CFG_WPS
+    if (wifi_wps_timer) { lv_timer_delete(wifi_wps_timer); wifi_wps_timer = NULL; }
     wifi_wps_status = NULL; wifi_wps_panel = NULL;
+#endif
     if (wifi_ov) { lv_obj_delete(wifi_ov); wifi_ov = NULL; }
 }
 
@@ -2559,15 +2572,21 @@ static void wifi_modal_open(void) {
     lv_obj_set_style_pad_column(bar, 6, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
     {
-        char b1[32], b2[32], b3[32], b4[32];
+        char b1[32], b2[32];
         snprintf(b1, sizeof(b1), LV_SYMBOL_LEFT    "  %s", tr(STR_CLOSE));
         snprintf(b2, sizeof(b2), LV_SYMBOL_REFRESH "  %s", tr(STR_RESCAN));
-        snprintf(b3, sizeof(b3), LV_SYMBOL_IMAGE   "%s",   tr(STR_WIFI_QR_BTN));
-        snprintf(b4, sizeof(b4), LV_SYMBOL_WIFI    "%s",   tr(STR_WIFI_WPS_BTN));
         small_button(bar, b1, CY_DIM,   wifi_modal_close_e);
         small_button(bar, b2, CY_CYAN,  wifi_rescan_e);
+#if CFG_WIFI_QR
+        char b3[32];
+        snprintf(b3, sizeof(b3), LV_SYMBOL_IMAGE "%s", tr(STR_WIFI_QR_BTN));
         small_button(bar, b3, CY_AMBER, wifi_qr_open_e);
+#endif
+#if CFG_WPS
+        char b4[32];
+        snprintf(b4, sizeof(b4), LV_SYMBOL_WIFI "%s", tr(STR_WIFI_WPS_BTN));
         small_button(bar, b4, CY_AMBER, wifi_wps_open_e);
+#endif
     }
     wifi_status = label(wifi_ov, tr(STR_WIFI_SCANNING), FONT_SMALL, CY_CYAN);
     lv_obj_align(wifi_status, LV_ALIGN_TOP_MID, 0, 44);
@@ -2831,10 +2850,14 @@ static void show_tab(int app) {
         case APP_NODES:   build_nodes();         break;
         case APP_SYS:     build_sys();           break;
         case APP_HOTSPOT: build_hotspot_app();   break;
+#if CFG_BADUSB
         case APP_BADUSB:  build_badusb_app();    break;
+#endif
         case APP_ABOUT:   build_about();         break;
+#if CFG_CAMERA
         case APP_CAMERA:  build_camera();        break;
         case APP_GALLERY: build_gallery();       break;
+#endif
         case APP_WIFI:
             /* WIFI = modal flottant ; on reste conceptuellement sur HOME */
             cur_tab = APP_HOME;
@@ -2845,6 +2868,7 @@ static void show_tab(int app) {
             }
             wifi_modal_open();
             break;
+#if CFG_BLUETOOTH
         case APP_BT:
             /* Bluetooth = modal flottant ; on reste conceptuellement sur HOME */
             cur_tab = APP_HOME;
@@ -2855,6 +2879,7 @@ static void show_tab(int app) {
             }
             bt_modal_open();
             break;
+#endif
         default: build_home(); break;
     }
 }
@@ -2871,11 +2896,17 @@ static const app_card_t HOME_APPS[] = {
     { APP_CHAT,    STR_TAB_CHAT,     LV_SYMBOL_ENVELOPE,  CY_CYAN    },
     { APP_NODES,   STR_TAB_NODES,    LV_SYMBOL_GPS,       CY_CYAN    },
     { APP_WIFI,    STR_SEC_WIFI,     LV_SYMBOL_WIFI,      CY_CYAN    },
+#if CFG_BLUETOOTH
     { APP_BT,      STR_SEC_BLUETOOTH,LV_SYMBOL_BLUETOOTH, CY_CYAN    },
+#endif
     { APP_HOTSPOT, STR_TAB_HOTSPOT,  LV_SYMBOL_IMAGE,     CY_MAGENTA },
+#if CFG_BADUSB
     { APP_BADUSB,  STR_TAB_BADUSB,   LV_SYMBOL_USB,       CY_MAGENTA },
+#endif
+#if CFG_CAMERA
     { APP_CAMERA,  STR_TAB_CAMERA,   LV_SYMBOL_IMAGE,     CY_GREEN   },
     { APP_GALLERY, STR_TAB_GALLERY,  LV_SYMBOL_DIRECTORY, CY_GREEN   },
+#endif
     { APP_SYS,     STR_TAB_SYS,      LV_SYMBOL_SETTINGS,  CY_AMBER   },
     { APP_ABOUT,   STR_TAB_ABOUT,    LV_SYMBOL_LIST,      CY_AMBER   },
 };

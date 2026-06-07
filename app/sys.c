@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "settings.h"
+#include "config.h"
 #include "lvgl/lvgl.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -565,7 +566,12 @@ void sys_cam_preview_async(const char *jpg_path, int w, int h,
  * le plan Y (greyscale natif) est passe a un zbar_image_scanner. A la
  * premiere detection, on appelle on_hit() sur le thread UI avec le payload.
  * Variables et pthread separes du flux camera 'normal' : les deux ne peuvent
- * pas tourner en parallele (camera mono-acces) mais le code reste isole. */
+ * pas tourner en parallele (camera mono-acces) mais le code reste isole.
+ *
+ * Le bloc complet est conditionne par CFG_WIFI_QR (cf. config.h / CMake) :
+ * desactiver evite la dependance libzbar au link. Quand OFF, on fournit des
+ * stubs pour que les callers eventuels ne fassent rien sans planter. */
+#if CFG_WIFI_QR
 #include <zbar.h>
 static volatile int      qr_run;
 static pthread_t         qr_tid;
@@ -717,6 +723,14 @@ void sys_qr_stop(void)
     lv_async_call_cancel(qr_hit_deliver, NULL);
     qr_frame_pending = 0;
 }
+#else  /* !CFG_WIFI_QR : stubs pour les callers eventuels (dead code en pratique). */
+void sys_qr_start(uint8_t *buf, int w, int h,
+                  cam_frame_cb_t on_frame, qr_hit_cb_t on_hit, void *user)
+{
+    (void)buf; (void)w; (void)h; (void)on_frame; (void)on_hit; (void)user;
+}
+void sys_qr_stop(void) { }
+#endif /* CFG_WIFI_QR */
 
 #define PWM_DUTY   "/sys/class/pwm/pwmchip0/pwm0/duty_cycle"
 #define PWM_PERIOD 1000000
@@ -954,7 +968,10 @@ void sys_wifi_connect_async(const char *ssid, const char *password,
 /* ---------- WPS push-button (PBC) ----------
  * wpa_cli wps_pbc rend la main immediatement ("OK") apres avoir lance le scan
  * WPS cote supplicant. On polle ensuite nmcli pour detecter l'apparition d'une
- * connexion active sur wlan0 (timeout 120 s, valeur standard WPS). */
+ * connexion active sur wlan0 (timeout 120 s, valeur standard WPS).
+ *
+ * Le bloc complet est conditionne par CFG_WPS (cf. config.h / CMake). */
+#if CFG_WPS
 static void wps_deliver(void *arg)
 {
     conn_ctx_t *c = arg;
@@ -1010,6 +1027,12 @@ void sys_wifi_wps_async(wifi_connect_cb_t cb, void *user)
     c->cb = cb; c->user = user;
     pthread_t t; pthread_create(&t, NULL, wps_thread, c); pthread_detach(t);
 }
+#else  /* !CFG_WPS : stub - retourne immediatement avec un message clair. */
+void sys_wifi_wps_async(wifi_connect_cb_t cb, void *user)
+{
+    if (cb) cb(false, "WPS desactive a la compilation", user);
+}
+#endif /* CFG_WPS */
 
 /* ---------- Bluetooth (asynchrone, via pthread + lv_async_call) ---------- */
 typedef struct {
