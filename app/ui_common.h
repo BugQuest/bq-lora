@@ -19,6 +19,15 @@
 /* Clavier virtuel partage entre tous les modals/views qui prennent du texte. */
 extern lv_obj_t *kb;
 
+/* Zone centrale (sous la topbar) : reconstruite a chaque changement d'onglet
+ * via lv_obj_clean. Les fonctions build_* y creent l'arbo d'objets. */
+extern lv_obj_t *content;
+
+/* Timer de rafraichissement de la vue courante (sys, hotspot, badusb...).
+ * Une seule vue actif a la fois -> on reutilise le meme slot. show_tab le
+ * delete et le set a NULL avant chaque rebuild. */
+extern lv_timer_t *sys_refresh_timer;
+
 /* ---- Helpers UI (definis dans ui.c) ---- */
 void           flat(lv_obj_t *o);
 void           panel(lv_obj_t *o, uint32_t border_color);
