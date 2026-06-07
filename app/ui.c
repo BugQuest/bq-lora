@@ -1106,7 +1106,7 @@ void show_tab(int app) {
     sys_bl_slider = NULL; sys_bl_lbl = NULL; sys_sleep_lbl = NULL;
     /* le clavier peut avoir remonté la barre de saisie sur la couche top :
      * la replacer sous content pour qu'elle soit bien libérée par le clean */
-    ui_chat_reset();          /* nullifie compose_*/msg_list + cache clavier */
+    ui_chat_reset();          /* nullifie compose / msg_list + cache clavier */
     cur_tab = app;
     lv_obj_clean(content);
 
