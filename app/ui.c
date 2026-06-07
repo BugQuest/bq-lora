@@ -45,7 +45,7 @@ lv_obj_t *kb;                      /* clavier virtuel (overlay, masqué) -- part
 static uint8_t   cur_chan = 0;     /* canal courant dans la vue chat */
 static int       cur_tab  = APP_HOME;
 
-static void show_tab(int app);
+void show_tab(int app);            /* non-static : utilise depuis ui_camera.c */
 /* Les helpers UI partages (kb, flat, panel, label, small_button, confirm_dialog)
  * sont declares dans ui_common.h pour etre utilises par les modules separes
  * (ui_audio.c, etc.) -- pas besoin de forward decls locales ici. */
@@ -1514,9 +1514,9 @@ static void build_home(void);
 /* build_badusb_app : remplace par ui_badusb_build (ui_badusb.h) */
 static void build_about(void);
 /* build_camera + build_gallery : extraits dans ui_camera.c
- * (ui_camera_build, ui_gallery_build). Les statics cam_*/gal_* y vivent. */
+ * (ui_camera_build, ui_gallery_build). Les statics cam_* et gal_* y vivent. */
 
-static void show_tab(int app) {
+void show_tab(int app) {
     if (sys_refresh_timer) { lv_timer_delete(sys_refresh_timer); sys_refresh_timer = NULL; }
     /* arrete le flux camera live et oublie ses widgets avant de nettoyer content */
     ui_camera_stream_stop();
