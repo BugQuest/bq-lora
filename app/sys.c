@@ -263,6 +263,7 @@ static void *mode_thread(void *a)
 void sys_usb_mode_set_async(usb_mode_t mode, usb_mode_cb_t cb, void *user)
 {
     mode_ctx_t *c = calloc(1, sizeof(*c));
+    if (!c) return;
     c->cb = cb; c->user = user; c->mode = mode;
     pthread_t t; pthread_create(&t, NULL, mode_thread, c); pthread_detach(t);
 }
@@ -283,6 +284,7 @@ static void *bu_thread(void *a)
 void sys_badusb_run_async(const char *path, badusb_cb_t cb, void *user)
 {
     bu_ctx_t *c = calloc(1, sizeof(*c));
+    if (!c) return;
     c->cb = cb; c->user = user;
     strncpy(c->path, path, sizeof(c->path) - 1);
     pthread_t t; pthread_create(&t, NULL, bu_thread, c); pthread_detach(t);
@@ -343,6 +345,7 @@ static void *cam_thread(void *a)
 void sys_cam_capture_async(int prev_w, int prev_h, cam_capture_cb_t cb, void *user)
 {
     cam_ctx_t *c = calloc(1, sizeof(*c));
+    if (!c) return;
     c->cb = cb; c->user = user; c->w = prev_w; c->h = prev_h;
     pthread_t t; pthread_create(&t, NULL, cam_thread, c); pthread_detach(t);
 }
@@ -555,6 +558,7 @@ void sys_cam_preview_async(const char *jpg_path, int w, int h,
                            cam_preview_cb_t cb, void *user)
 {
     campv_ctx_t *c = calloc(1, sizeof(*c));
+    if (!c) return;
     c->cb = cb; c->user = user; c->w = w; c->h = h;
     strncpy(c->jpg, jpg_path, sizeof(c->jpg) - 1);
     pthread_t t; pthread_create(&t, NULL, campv_thread, c); pthread_detach(t);
@@ -820,6 +824,7 @@ static void *upd_check_thread(void *a)
 void sys_update_check_async(update_check_cb_t cb, void *user)
 {
     upd_ctx_t *c = calloc(1, sizeof(*c));
+    if (!c) return;
     c->cb = cb; c->user = user;
     pthread_t t; pthread_create(&t, NULL, upd_check_thread, c); pthread_detach(t);
 }
@@ -841,6 +846,7 @@ void sys_update_apply_async(update_apply_cb_t cb, void *user)
 {
     remove(UPD_PROGRESS_FILE);   /* repart de zero (evite de lire un ancien jalon) */
     upd_apply_ctx_t *c = calloc(1, sizeof(*c));
+    if (!c) return;
     c->cb = cb; c->user = user;
     pthread_t t; pthread_create(&t, NULL, upd_apply_thread, c); pthread_detach(t);
 }
@@ -931,6 +937,7 @@ static void *scan_thread(void *arg)
 void sys_wifi_scan_async(wifi_scan_cb_t cb, void *user)
 {
     scan_ctx_t *c = calloc(1, sizeof(*c));
+    if (!c) return;
     c->cb = cb; c->user = user;
     pthread_t t; pthread_create(&t, NULL, scan_thread, c); pthread_detach(t);
 }
@@ -979,6 +986,7 @@ void sys_wifi_connect_async(const char *ssid, const char *password,
                             wifi_connect_cb_t cb, void *user)
 {
     conn_ctx_t *c = calloc(1, sizeof(*c));
+    if (!c) return;
     c->cb = cb; c->user = user;
     strncpy(c->ssid, ssid, sizeof(c->ssid) - 1);
     if (password) strncpy(c->pass, password, sizeof(c->pass) - 1);
@@ -1044,6 +1052,7 @@ static void *wps_thread(void *arg)
 void sys_wifi_wps_async(wifi_connect_cb_t cb, void *user)
 {
     conn_ctx_t *c = calloc(1, sizeof(*c));
+    if (!c) return;
     c->cb = cb; c->user = user;
     pthread_t t; pthread_create(&t, NULL, wps_thread, c); pthread_detach(t);
 }
@@ -1107,6 +1116,7 @@ static void *bt_scan_thread(void *arg)
 void sys_bt_scan_async(bt_scan_cb_t cb, void *user)
 {
     bt_scan_ctx_t *c = calloc(1, sizeof(*c));
+    if (!c) return;
     c->cb = cb; c->user = user;
     pthread_t t; pthread_create(&t, NULL, bt_scan_thread, c); pthread_detach(t);
 }
@@ -1157,6 +1167,7 @@ void sys_bt_action_async(const char *verb, const char *addr,
                          bt_action_cb_t cb, void *user)
 {
     bt_act_ctx_t *c = calloc(1, sizeof(*c));
+    if (!c) return;
     c->cb = cb; c->user = user;
     strncpy(c->verb, verb, sizeof(c->verb) - 1);
     strncpy(c->addr, addr, sizeof(c->addr) - 1);

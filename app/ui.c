@@ -515,7 +515,7 @@ static void build_chat(void) {
         }
         if (unread > 0) {
             lv_obj_t *b = lv_label_create(chip);
-            char bb[8]; snprintf(bb, sizeof(bb), "%u", unread > 9 ? 9 : unread);
+            char bb[8]; snprintf(bb, sizeof(bb), "%u", (unsigned)(unread > 9 ? 9 : unread));
             if (unread > 9) strcat(bb, "+");
             lv_label_set_text(b, bb);
             lv_obj_set_style_text_font(b, FONT_SMALL, 0);
@@ -2168,6 +2168,7 @@ static void sys_refresh(lv_timer_t *t) {
     bool have_info = sys_lbl_host != NULL;
     bool need_info = have_info || sys_lbl_wifi || sys_lbl_usb_state || sys_lbl_usb_ip;
     sys_info_t i;
+    memset(&i, 0, sizeof(i));        /* defaut neutre si pas need_info (silence cppcheck) */
     if (need_info) sys_info_get(&i);
     char b[80];
     if (have_info) {
