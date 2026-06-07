@@ -40,6 +40,11 @@ static uint8_t   cur_chan = 0;     /* canal courant dans la vue chat */
 static int       cur_tab  = APP_HOME;
 
 static void show_tab(int app);
+/* Forward declarations des helpers UI utilises tot dans le fichier (definis
+ * plus bas). Sans ces declarations, les call-sites en amont auraient le type
+ * implicit int() et generent des erreurs de compilation. */
+static lv_obj_t *small_button(lv_obj_t *parent, const char *txt, uint32_t color, lv_event_cb_t cb);
+static void confirm_dialog(const char *msg, void (*on_yes)(void));
 static void bt_modal_open(void);
 static void chanmgr_open_e(lv_event_t *e);
 static lv_obj_t *cm_ov, *cm_list;       /* gestionnaire de canaux (modal) */
@@ -1065,7 +1070,6 @@ static lv_obj_t *small_button(lv_obj_t *parent, const char *txt, uint32_t color,
     return b;
 }
 
-static void confirm_dialog(const char *msg, void (*on_yes)(void));
 static void reboot_yes(void)      { sys_reboot(); }
 static void shutdown_yes(void)    { sys_shutdown(); }
 static void restart_app_yes(void) { sys_restart_app(); }
