@@ -2,7 +2,9 @@
 #include "ui_badusb.h"
 #include "sys.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdint.h>
 #include <dirent.h>
 #include <sys/stat.h>
