@@ -1490,7 +1490,6 @@ static void settings_modal_open_e(lv_event_t *e) {
     small_button(row, tr(STR_SAVE),   CY_CYAN, set_save_cb_e);
 }
 /* Le gestionnaire de canaux a ete extrait dans ui_chanmgr.c (ui_chanmgr_open_e). */
-#endif
 
 static void hot_toggle_cb(lv_event_t *e) {
     (void)e;
