@@ -92,7 +92,12 @@ const mesh_message_t *mesh_message(uint8_t ch, int idx);
 /* Compteur cumulatif de messages texte REÇUS (hors les nôtres), monotone depuis
  * le lancement. L'UI en garde une copie "lue" pour calculer les non-lus. */
 unsigned            mesh_rx_msg_total(void);
+/* Idem mais par canal (pour les badges sur les chips de canaux). */
+unsigned            mesh_rx_msg_count(uint8_t ch);
 void                mesh_send(uint8_t ch, const char *text);
+/* Envoi d'un message direct (DM) vers un nœud par num.
+ * Si dest_num == 0, fallback sur mesh_send(ch=0). */
+void                mesh_send_dm(uint32_t dest_num, const char *text);
 
 const mesh_self_t  *mesh_self(void);
 

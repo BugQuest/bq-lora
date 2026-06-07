@@ -78,6 +78,8 @@ static int         s_node_count;
 
 /* total cumulatif de messages texte reçus (hors les nôtres) -> badge non-lus */
 static unsigned    s_rx_total;
+/* idem mais par canal (badge par chip de canal). Index = position de canal. */
+static unsigned    s_rx_per_ch[MAX_CHANS];
 
 static chan_slot_t s_chans[MAX_CHANS];
 static int         s_chan_count;
@@ -101,6 +103,12 @@ static time_t      s_reload_at;        /* != 0 : re-demander la config à cette 
 #define NODES_SAVE_MIN_SECS 30         /* throttle écriture (ménage la carte SD) */
 static bool        s_nodes_save_pending;
 static time_t      s_nodes_last_save;
+
+/* Persistance de l'historique des messages (survit aux redemarrages). */
+#define MSGS_DB_PATH       "/home/bq-lora/bq-lora-ui/messages.db"
+#define MSGS_SAVE_MIN_SECS 30
+static bool        s_msgs_save_pending;
+static time_t      s_msgs_last_save;
 
 /* ----------------------------------------------------------------- liaison */
 static bool   s_enabled = true;        /* l'UI pilote-t-elle la liaison ? */
@@ -197,6 +205,69 @@ static void mesh_nodes_save(void)
     rename(tmp, NODES_DB_PATH);
     s_nodes_save_pending = false;
     s_nodes_last_save = time(NULL);
+}
+
+/* Echappe tabs/newlines pour serialisation TSV (in-place ; suffisamment large). */
+static void escape_tsv(char *dst, size_t cap, const char *src)
+{
+    size_t k = 0;
+    for (; src && *src && k < cap - 1; src++) {
+        char c = *src;
+        if (c == '\t' || c == '\n' || c == '\r') c = ' ';
+        dst[k++] = c;
+    }
+    dst[k] = '\0';
+}
+
+/* Sauvegarde l'historique des messages (jusqu'a MAX_MSGS = 128).
+ * Format : ts\tch\tout\tack\tfrom\ttext  (un message par ligne). */
+static void mesh_msgs_save(void)
+{
+    char tmp[256];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", MSGS_DB_PATH);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f, "# bq-lora-ui messages v1: time\\tch\\tout\\tack\\tfrom\\ttext\n");
+    char fbuf[80], tbuf[200];
+    for (int i = 0; i < s_msg_count; i++) {
+        msg_slot_t *s = &s_msgs[i];
+        escape_tsv(fbuf, sizeof(fbuf), s->from);
+        escape_tsv(tbuf, sizeof(tbuf), s->m.text);
+        fprintf(f, "%s\t%u\t%u\t%u\t%s\t%s\n",
+                s->time, (unsigned)s->m.ch, (unsigned)s->m.out, (unsigned)s->m.ack,
+                fbuf, tbuf);
+    }
+    fclose(f);
+    rename(tmp, MSGS_DB_PATH);
+    s_msgs_save_pending = false;
+    s_msgs_last_save = time(NULL);
+}
+
+static void mesh_msgs_load(void)
+{
+    FILE *f = fopen(MSGS_DB_PATH, "r");
+    if (!f) return;
+    char line[400];
+    while (fgets(line, sizeof(line), f) && s_msg_count < MAX_MSGS) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        char *c[6];
+        if (split_tabs(line, c, 6) < 6) continue;
+        msg_slot_t *s = &s_msgs[s_msg_count++];
+        memset(s, 0, sizeof(*s));
+        snprintf(s->time, sizeof(s->time), "%s", c[0]);
+        s->m.time = s->time;
+        s->m.ch   = (uint8_t)atoi(c[1]);
+        s->m.out  = atoi(c[2]) ? true : false;
+        s->m.ack  = (uint8_t)atoi(c[3]);
+        snprintf(s->from, sizeof(s->from), "%s", c[4]);
+        s->m.from = s->from;
+        size_t n = strlen(c[5]);
+        if (n >= sizeof(s->m.text)) n = sizeof(s->m.text) - 1;
+        memcpy(s->m.text, c[5], n);
+        s->m.text[n] = '\0';
+    }
+    fclose(f);
+    s_msgs_save_pending = false;
 }
 
 /* Recharge la trace au démarrage : la liste est visible avant le handshake. */
@@ -313,7 +384,11 @@ static void add_text(int chan_index, uint32_t from, uint32_t id,
 
     m->m.out = (from == s_my_num && s_my_num);
     m->m.ack = m->m.out ? 1 : 0;
-    if (!m->m.out) s_rx_total++;     /* message entrant -> incremente les non-lus */
+    if (!m->m.out) {
+        s_rx_total++;                /* message entrant -> incremente les non-lus */
+        if (m->m.ch < MAX_CHANS) s_rx_per_ch[m->m.ch]++;
+    }
+    s_msgs_save_pending = true;      /* persistance differee */
     s_dirty = true;
 }
 
@@ -677,6 +752,62 @@ void mesh_send(uint8_t ch, const char *text)
     m->m.time = m->time;
     m->m.out = true;
     m->m.ack = 1;
+    s_msgs_save_pending = true;
+    s_dirty = true;
+}
+
+/* DM : meme structure qu'un broadcast mais champ "to" = dest_num. Canal = 0
+ * (default) car les DM passent normalement sur le primary, ignore les autres. */
+void mesh_send_dm(uint32_t dest_num, const char *text)
+{
+    if (!text || !text[0]) return;
+    if (!dest_num) { mesh_send(0, text); return; }
+    size_t tlen = strlen(text);
+    if (tlen > 200) tlen = 200;
+
+    int real_index = (s_chan_count > 0) ? s_chans[0].index : 0;
+    uint32_t id = ((uint32_t)rand() << 16) ^ (uint32_t)rand() ^ (uint32_t)time(NULL);
+    if (!id) id = 1;
+
+    uint8_t data[256];
+    pb_writer dw; pb_writer_init(&dw, data, sizeof(data));
+    pb_field_varint(&dw, 1, PORT_TEXT);
+    pb_field_bytes(&dw, 2, (const uint8_t *)text, tlen);
+
+    uint8_t pkt[320];
+    pb_writer pw; pb_writer_init(&pw, pkt, sizeof(pkt));
+    pb_field_fixed32(&pw, 2, dest_num);          /* DM : destinataire specifique */
+    pb_field_varint(&pw, 3, (uint32_t)real_index);
+    pb_field_bytes(&pw, 4, data, dw.len);
+    pb_field_fixed32(&pw, 6, id);
+    pb_field_bool(&pw, 10, true);
+
+    uint8_t tr[400];
+    pb_writer tw; pb_writer_init(&tw, tr, sizeof(tr));
+    pb_field_bytes(&tw, 1, pkt, pw.len);
+    if (!dw.ovf && !pw.ovf && !tw.ovf) send_frame(tr, tw.len);
+
+    /* echo local : on l'attache au canal 0 (l'UI traitera le DM comme un */
+    /* message texte sortant, avec destinataire connu via le 'to' du paquet) */
+    if (s_msg_count >= MAX_MSGS) {
+        memmove(&s_msgs[0], &s_msgs[1], sizeof(s_msgs[0]) * (MAX_MSGS - 1));
+        s_msg_count--;
+    }
+    msg_slot_t *m = &s_msgs[s_msg_count++];
+    memset(m, 0, sizeof(*m));
+    m->id = id;
+    m->m.ch = 0;
+    const char *nm = node_name(dest_num);
+    if (nm) snprintf(m->from, sizeof(m->from), "%s", nm);
+    else    snprintf(m->from, sizeof(m->from), "!%08x", dest_num);
+    m->m.from = m->from;
+    memcpy(m->m.text, text, tlen);
+    m->m.text[tlen] = '\0';
+    fmt_clock(m->time, sizeof(m->time));
+    m->m.time = m->time;
+    m->m.out = true;
+    m->m.ack = 1;
+    s_msgs_save_pending = true;
     s_dirty = true;
 }
 
@@ -774,6 +905,7 @@ void mesh_init(void)
     s_self.preset = s_preset;
     s_self.uptime = s_uptime;
     mesh_nodes_load();           /* trace locale : nodes connus visibles de suite */
+    mesh_msgs_load();            /* historique : messages visibles avant la reconnexion */
     if (s_enabled) mesh_try_connect();
 }
 
@@ -786,6 +918,9 @@ void mesh_poll(void)
     /* Persistance throttlée de la trace des nœuds (au plus 1 écriture / 30 s). */
     if (s_nodes_save_pending && now - s_nodes_last_save >= NODES_SAVE_MIN_SECS)
         mesh_nodes_save();
+    /* Idem pour l'historique des messages. */
+    if (s_msgs_save_pending && now - s_msgs_last_save >= MSGS_SAVE_MIN_SECS)
+        mesh_msgs_save();
 
     if (s_fd < 0) {
         if (now - s_last_attempt >= RECONNECT_SECS) mesh_try_connect();
@@ -841,6 +976,9 @@ const mesh_channel_t *mesh_channel(int i)
 }
 
 unsigned mesh_rx_msg_total(void) { return s_rx_total; }
+unsigned mesh_rx_msg_count(uint8_t ch) {
+    return (ch < MAX_CHANS) ? s_rx_per_ch[ch] : 0;
+}
 
 int mesh_node_count(void) { return s_node_count; }
 

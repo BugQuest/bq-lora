@@ -91,6 +91,9 @@ static lv_timer_t *tb_timer;
  * a niveau a l'ouverture du CHAT) ; non-lus = mesh_rx_msg_total() - msg_seen. */
 static lv_obj_t *home_msg_card, *home_msg_badge;
 static unsigned  msg_seen;
+/* Idem par canal : badge sur les chips. msg_seen_ch[ch] = "lu" pour ce canal. */
+#define UI_MAX_CHANS 8
+static unsigned  msg_seen_ch[UI_MAX_CHANS];
 static void      update_msg_badge(void);
 
 static void tb_back_cb(lv_event_t *e) { (void)e; show_tab(APP_HOME); }
@@ -414,6 +417,8 @@ static void rebuild_messages(void) {
 
 static void chan_cb(lv_event_t *e) {
     cur_chan = (uint8_t)(intptr_t)lv_event_get_user_data(e);
+    if (cur_chan < UI_MAX_CHANS)
+        msg_seen_ch[cur_chan] = mesh_rx_msg_count(cur_chan);  /* lu en arrivant */
     show_tab(APP_CHAT);
 }
 
@@ -463,6 +468,8 @@ static void kb_cb(lv_event_t *e) {
 
 static void build_chat(void) {
     msg_seen = mesh_rx_msg_total();   /* ouverture du CHAT = tout marque comme lu */
+    if (cur_chan < UI_MAX_CHANS)
+        msg_seen_ch[cur_chan] = mesh_rx_msg_count(cur_chan);
     /* rangée des canaux */
     lv_obj_t *chans = lv_obj_create(content);
     lv_obj_set_size(chans, LV_PCT(100), 38);
@@ -489,6 +496,26 @@ static void build_chat(void) {
         snprintf(nm, sizeof(nm), "%s%s", c->enc ? LV_SYMBOL_EYE_CLOSE " " : "# ", c->name);
         lv_obj_t *l = label(chip, nm, FONT_SMALL, active ? CY_TEXT : col);
         lv_obj_center(l);
+        /* badge non-lus : petit cercle magenta en coin avec le compte (9+) */
+        unsigned unread = 0;
+        if (i < UI_MAX_CHANS) {
+            unsigned tot = mesh_rx_msg_count((uint8_t)i);
+            if (tot > msg_seen_ch[i]) unread = tot - msg_seen_ch[i];
+        }
+        if (unread > 0) {
+            lv_obj_t *b = lv_label_create(chip);
+            char bb[8]; snprintf(bb, sizeof(bb), "%u", unread > 9 ? 9 : unread);
+            if (unread > 9) strcat(bb, "+");
+            lv_label_set_text(b, bb);
+            lv_obj_set_style_text_font(b, FONT_SMALL, 0);
+            lv_obj_set_style_text_color(b, lv_color_hex(CY_TEXT), 0);
+            lv_obj_set_style_bg_color(b, lv_color_hex(CY_MAGENTA), 0);
+            lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+            lv_obj_set_style_pad_hor(b, 4, 0);
+            lv_obj_set_style_pad_ver(b, 0, 0);
+            lv_obj_align(b, LV_ALIGN_TOP_RIGHT, 2, -3);
+        }
     }
 
     /* bouton de gestion des canaux (⚙) en bout de rangée — plus large pour
