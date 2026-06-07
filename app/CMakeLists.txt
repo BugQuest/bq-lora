@@ -25,19 +25,14 @@ add_compile_definitions(LV_CONF_INCLUDE_SIMPLE)
 
 # Defines de configuration vers le code (le header app/config.h applique les
 # fallbacks par defaut si un flag n'est pas passe ici, pour rester safe quand
-# on compile sans CMake).
-if(ENABLE_CAMERA)    add_compile_definitions(CFG_CAMERA=1) endif()
-if(ENABLE_BLUETOOTH) add_compile_definitions(CFG_BLUETOOTH=1) endif()
-if(ENABLE_BADUSB)    add_compile_definitions(CFG_BADUSB=1) endif()
-if(ENABLE_WIFI_QR)   add_compile_definitions(CFG_WIFI_QR=1) endif()
-if(ENABLE_WPS)       add_compile_definitions(CFG_WPS=1) endif()
-if(ENABLE_BME280)    add_compile_definitions(CFG_BME280=1) endif()
-if(NOT ENABLE_CAMERA)    add_compile_definitions(CFG_CAMERA=0) endif()
-if(NOT ENABLE_BLUETOOTH) add_compile_definitions(CFG_BLUETOOTH=0) endif()
-if(NOT ENABLE_BADUSB)    add_compile_definitions(CFG_BADUSB=0) endif()
-if(NOT ENABLE_WIFI_QR)   add_compile_definitions(CFG_WIFI_QR=0) endif()
-if(NOT ENABLE_WPS)       add_compile_definitions(CFG_WPS=0) endif()
-if(NOT ENABLE_BME280)    add_compile_definitions(CFG_BME280=0) endif()
+# on compile sans CMake). 1 = active, 0 = desactive.
+foreach(mod CAMERA BLUETOOTH BADUSB WIFI_QR WPS BME280)
+    if(ENABLE_${mod})
+        add_compile_definitions(CFG_${mod}=1)
+    else()
+        add_compile_definitions(CFG_${mod}=0)
+    endif()
+endforeach()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
