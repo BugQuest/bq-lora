@@ -371,7 +371,7 @@ static void mesh_refresh_cb(lv_timer_t *t) {
     if (!mesh_take_dirty()) return;
     ui_chanmgr_refresh_if_open();   /* canaux changés -> rafraîchit le gestionnaire */
     ui_chat_rebuild_if_visible();    /* maj liste messages si vue CHAT */
-    else if (cur_tab == APP_HOME)        update_msg_badge();
+    if (cur_tab == APP_HOME)         update_msg_badge();
 }
 
 /* ---------------------------------------------------------------- vue SYS */
