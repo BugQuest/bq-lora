@@ -4,6 +4,9 @@
 #include "ui_node_views.h"
 #include "ui_chanmgr.h"
 #include "ui_badusb.h"
+#include "ui_bt.h"
+#include "ui_hotspot.h"
+#include "ui_settings.h"
 #include "mesh.h"
 #include "calib.h"
 #include "sys.h"
@@ -44,7 +47,7 @@ static void show_tab(int app);
 /* Les helpers UI partages (kb, flat, panel, label, small_button, confirm_dialog)
  * sont declares dans ui_common.h pour etre utilises par les modules separes
  * (ui_audio.c, etc.) -- pas besoin de forward decls locales ici. */
-static void bt_modal_open(void);
+/* bt_modal_open : extrait dans ui_bt.c (ui_bt_modal_open). */
 /* gestionnaire de canaux : deplace dans ui_chanmgr.c (point d'entree
  * ui_chanmgr_open_e, rafraichi via ui_chanmgr_refresh_if_open). */
 
@@ -812,7 +815,7 @@ static lv_obj_t *sys_lbl_usb_state, *sys_lbl_usb_ip;
 static lv_obj_t *sys_lbl_wifi_radio_state, *sys_lbl_wifi_radio_btn;
 static lv_obj_t *sys_lbl_bt_state, *sys_lbl_bt_btn;
 static lv_obj_t *sys_lbl_usb_mode_state, *sys_lbl_usb_mode_btn;
-static lv_obj_t *hap_lbl_state, *hap_lbl_btn;     /* app HOTSPOT */
+/* App HOTSPOT (hap_*, qr_open_cb, hot_toggle_cb) extraite dans ui_hotspot.c. */
 /* App BAD USB (bap_*, bad_run_*) deplacee dans ui_badusb.c. */
 static lv_obj_t *upd_lbl_state, *upd_lbl_hash, *upd_btn_install; /* MISES A JOUR */
 static lv_obj_t  *upd_ov, *upd_bar, *upd_pct;     /* overlay barre de chargement maj */
@@ -883,8 +886,6 @@ static void lang_toggle_cb(lv_event_t *e) {
 }
 static void calib_cb(lv_event_t *e)    { (void)e; calib_start(NULL); }
 static void ssh_toggle_cb(lv_event_t *e) { (void)e; sys_ssh_set(!sys_ssh_running()); }
-
-static void hot_yes(void)        { sys_hotspot_set(!sys_hotspot_active()); }
 
 static void wifi_radio_yes(void) { sys_wifi_radio_set(!sys_wifi_radio_on()); }
 static void wifi_radio_toggle_cb(lv_event_t *e) {
@@ -1059,199 +1060,11 @@ static void log_refresh(lv_obj_t *ta) {
 }
 static void log_refresh_cb(lv_event_t *e) { (void)e; if (sys_log_ta) log_refresh(sys_log_ta); }
 
-/* QR code WiFi du hotspot : ouvre un modal plein écran avec le QR */
-static lv_obj_t *qr_ov;
-static void qr_close_cb(lv_event_t *e) { (void)e; if (qr_ov) { lv_obj_delete(qr_ov); qr_ov = NULL; } }
-static void qr_open_cb(lv_event_t *e) {
-    (void)e;
-    qr_ov = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(qr_ov, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(qr_ov, lv_color_hex(CY_BG), 0);
-    lv_obj_set_style_bg_opa(qr_ov, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(qr_ov, 0, 0);
-    lv_obj_set_style_radius(qr_ov, 0, 0);
-    lv_obj_set_style_pad_all(qr_ov, 8, 0);
-    lv_obj_clear_flag(qr_ov, LV_OBJ_FLAG_SCROLLABLE);
-
-    char hdr[96]; snprintf(hdr, sizeof(hdr), "Scanner pour rejoindre %s", settings_hotspot_ssid());
-    lv_obj_t *t = label(qr_ov, hdr, FONT_SMALL, CY_CYAN);
-    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 0);
-
-    /* WIFI:T:WPA;S:<ssid>;P:<pass>;; */
-    char payload[160];
-    snprintf(payload, sizeof(payload), "WIFI:T:WPA;S:%s;P:%s;;",
-             settings_hotspot_ssid(), settings_hotspot_pass());
-    lv_obj_t *qr = lv_qrcode_create(qr_ov);
-    lv_qrcode_set_size(qr, 260);
-    lv_qrcode_set_dark_color(qr, lv_color_hex(CY_CYAN));
-    lv_qrcode_set_light_color(qr, lv_color_hex(CY_BG));
-    lv_qrcode_update(qr, payload, (int32_t)strlen(payload));
-    lv_obj_align(qr, LV_ALIGN_CENTER, 0, -10);
-
-    char cred[160]; snprintf(cred, sizeof(cred), "SSID  %s\npass  %s",
-                             settings_hotspot_ssid(), settings_hotspot_pass());
-    lv_obj_t *c = label(qr_ov, cred, FONT_SMALL, CY_TEXT);
-    lv_obj_align(c, LV_ALIGN_CENTER, 0, 140);
-
-    lv_obj_t *bar = lv_obj_create(qr_ov);
-    lv_obj_set_size(bar, LV_PCT(100), 36);
-    flat(bar); lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
-    small_button(bar, LV_SYMBOL_CLOSE "  FERMER", CY_DIM, qr_close_cb);
 }
 
-/* ----- modal Reglages : node name, SSID/pass hotspot, fuseau ----- */
-static lv_obj_t *set_ov, *set_ta_node, *set_ta_ssid, *set_ta_pass, *set_ta_tz;
-
-void set_ta_focus_e(lv_event_t *e) {
-    lv_obj_t *ta = lv_event_get_target_obj(e);
-    lv_keyboard_set_textarea(kb, ta);
-    lv_obj_clear_flag(kb, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(kb);
-}
-
-static void set_modal_close(void) {
-    if (set_ov) { lv_obj_delete(set_ov); set_ov = NULL; }
-    lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
-}
-
-/* Recopie src dans dst en retirant les espaces de début/fin. dst de taille cap. */
-static void str_trim(const char *src, char *dst, size_t cap) {
-    while (*src && isspace((unsigned char)*src)) src++;
-    size_t n = strlen(src);
-    while (n > 0 && isspace((unsigned char)src[n - 1])) n--;
-    if (n >= cap) n = cap - 1;
-    memcpy(dst, src, n);
-    dst[n] = '\0';
-}
-
-/* Valide le nom long du nœud : 1 à 39 caractères imprimables (la limite
- * firmware Meshtastic est ~40 octets pour long_name). Refuse vide/espaces. */
-static bool node_name_valid(const char *s) {
-    size_t n = strlen(s);
-    if (n < 1 || n > 39) return false;
-    for (const char *p = s; *p; p++) {
-        unsigned char c = (unsigned char)*p;
-        if (c < 0x20 || c == 0x7f) return false;   /* pas de caractères de contrôle */
-    }
-    return true;
-}
-
-/* Dérive un nom court (≤4 car.) à partir du nom long : initiales des mots si
- * plusieurs mots, sinon les 4 premiers caractères. Résultat en majuscules. */
-static void derive_short_name(const char *longn, char *out, size_t cap) {
-    char ini[8]; size_t k = 0;
-    bool prev_sp = true;
-    for (const char *p = longn; *p && k < 4; p++) {
-        unsigned char c = (unsigned char)*p;
-        if (isspace(c)) { prev_sp = true; continue; }
-        if (prev_sp && isalnum(c)) ini[k++] = (char)toupper(c);
-        prev_sp = false;
-    }
-    if (k >= 2) {                       /* plusieurs mots -> initiales */
-        ini[k] = '\0';
-    } else {                            /* un seul mot -> 4 premiers car. */
-        k = 0;
-        for (const char *p = longn; *p && k < 4; p++) {
-            unsigned char c = (unsigned char)*p;
-            if (!isspace(c)) ini[k++] = (char)toupper(c);
-        }
-        ini[k] = '\0';
-    }
-    if (k == 0) { ini[0] = '?'; ini[1] = '\0'; }
-    size_t n = strlen(ini);
-    if (n >= cap) n = cap - 1;
-    memcpy(out, ini, n);
-    out[n] = '\0';
-}
-
-static void set_save_cb_e(lv_event_t *e) {
-    (void)e;
-    char name[48];
-    str_trim(lv_textarea_get_text(set_ta_node), name, sizeof(name));
-    if (!node_name_valid(name)) {
-        confirm_dialog(tr(STR_INVALID_NODE_NAME), NULL);
-        return;                          /* garde le modal ouvert */
-    }
-
-    bool name_changed = strcmp(name, settings_node_name()) != 0;
-
-    settings_set_node_name   (name);
-    settings_set_hotspot_ssid(lv_textarea_get_text(set_ta_ssid));
-    settings_set_hotspot_pass(lv_textarea_get_text(set_ta_pass));
-    const char *tz = lv_textarea_get_text(set_ta_tz);
-    settings_set_timezone(tz);
-    settings_save();
-    sys_set_timezone(tz);
-
-    /* Pousse le nouveau nom sur le mesh (AdminMessage set_owner). */
-    bool offline = false;
-    if (name_changed) {
-        char shortn[8];
-        derive_short_name(name, shortn, sizeof(shortn));
-        if (!mesh_set_owner(name, shortn))
-            offline = true;
-    }
-
-    set_modal_close();
-    if (offline)
-        confirm_dialog(tr(STR_NAME_SAVED_LOCAL), NULL);
-}
-static void set_cancel_cb_e(lv_event_t *e) { (void)e; set_modal_close(); }
-
-lv_obj_t *settings_field(lv_obj_t *parent, const char *key, const char *val, bool pwd) {
-    label(parent, key, FONT_SMALL, CY_DIM);
-    lv_obj_t *ta = lv_textarea_create(parent);
-    lv_textarea_set_one_line(ta, true);
-    if (pwd) lv_textarea_set_password_mode(ta, true);
-    lv_textarea_set_text(ta, val);
-    lv_obj_set_size(ta, LV_PCT(100), 30);
-    lv_obj_set_style_bg_color(ta, lv_color_hex(CY_PANEL2), 0);
-    lv_obj_set_style_text_color(ta, lv_color_hex(CY_TEXT), 0);
-    lv_obj_set_style_text_font(ta, FONT_BODY, 0);
-    lv_obj_set_style_border_color(ta, lv_color_hex(CY_BORDER), 0);
-    lv_obj_set_style_border_width(ta, 1, 0);
-    lv_obj_set_style_radius(ta, 2, 0);
-    lv_obj_add_event_cb(ta, set_ta_focus_e, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_event_cb(ta, set_ta_focus_e, LV_EVENT_FOCUSED, NULL);
-    return ta;
-}
-
-static void settings_modal_open_e(lv_event_t *e) {
-    (void)e;
-    set_ov = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(set_ov, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(set_ov, lv_color_hex(CY_BG), 0);
-    lv_obj_set_style_bg_opa(set_ov, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(set_ov, 0, 0);
-    lv_obj_set_style_radius(set_ov, 0, 0);
-    lv_obj_set_style_pad_all(set_ov, 8, 0);
-    lv_obj_clear_flag(set_ov, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(set_ov, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(set_ov, 4, 0);
-
-    label(set_ov, tr(STR_SET_TITLE), FONT_BIG, CY_CYAN);
-
-    set_ta_node = settings_field(set_ov, tr(STR_FIELD_NODE_NAME),    settings_node_name(),    false);
-    set_ta_ssid = settings_field(set_ov, tr(STR_FIELD_HOTSPOT_SSID), settings_hotspot_ssid(), false);
-    set_ta_pass = settings_field(set_ov, tr(STR_FIELD_HOTSPOT_PASS), settings_hotspot_pass(), true);
-    set_ta_tz   = settings_field(set_ov, tr(STR_FIELD_TIMEZONE),     settings_timezone(),     false);
-
-    lv_obj_t *row = lv_obj_create(set_ov);
-    lv_obj_set_size(row, LV_PCT(100), 38);
-    flat(row); lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(row, 8, 0);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    small_button(row, tr(STR_CANCEL), CY_DIM,  set_cancel_cb_e);
-    small_button(row, tr(STR_SAVE),   CY_CYAN, set_save_cb_e);
-}
 /* Le gestionnaire de canaux a ete extrait dans ui_chanmgr.c (ui_chanmgr_open_e). */
 
-static void hot_toggle_cb(lv_event_t *e) {
-    (void)e;
-    bool on = sys_hotspot_active();
-    confirm_dialog(on ? tr(STR_CONFIRM_HOTSPOT_OFF) : tr(STR_CONFIRM_HOTSPOT_ON), hot_yes);
-}
+/* hot_toggle_cb : extrait dans ui_hotspot.c */
 static void wifi_modal_open(void);
 static void wifi_btn_cb(lv_event_t *e) { (void)e; wifi_modal_open(); }
 
@@ -1504,7 +1317,7 @@ static void sys_build_settings_tab(lv_obj_t *col)
     lv_obj_t *s = section(col, tr(STR_SEC_SETTINGS));
     {
         char bm[40]; snprintf(bm, sizeof(bm), LV_SYMBOL_SETTINGS "%s", tr(STR_BTN_MODIFY));
-        small_button(s, bm, CY_CYAN, settings_modal_open_e);
+        small_button(s, bm, CY_CYAN, ui_settings_open_e);
     }
     label(s, tr(STR_SETTINGS_DETAILS), FONT_SMALL, CY_DIM);
 
@@ -2065,196 +1878,10 @@ static void wifi_modal_open(void) {
     sys_wifi_scan_async(wifi_scan_done, NULL);
 }
 
-/* ------------- modal Bluetooth (scan BLE + appairage + console serie) ------------- */
-static lv_obj_t *bt_ov, *bt_list_ov, *bt_status, *bt_act_panel, *bt_serial_btn_lbl;
-static bt_device_t bt_kept[48];
-static int  bt_kept_n = 0;
-
-static void bt_modal_close_e(lv_event_t *e) { (void)e; if (bt_ov) { lv_obj_delete(bt_ov); bt_ov = NULL; bt_list_ov = bt_status = bt_act_panel = bt_serial_btn_lbl = NULL; } }
-
-static void bt_scan_done(const bt_device_t *list, int n, void *user);
-
-static void bt_rescan_e(lv_event_t *e) {
-    (void)e;
-    if (bt_status) lv_label_set_text(bt_status, tr(STR_BT_SCANNING));
-    sys_bt_scan_async(bt_scan_done, NULL);
-}
-
-static void bt_action_done(bool ok, const char *msg, void *user) {
-    (void)user;
-    if (bt_status) {
-        lv_label_set_text(bt_status, ok ? tr(STR_BT_OK_RESCAN) : (msg && msg[0] ? msg : tr(STR_BT_FAILED)));
-        lv_obj_set_style_text_color(bt_status, lv_color_hex(ok ? CY_GREEN : CY_MAGENTA), 0);
-    }
-    if (ok) sys_bt_scan_async(bt_scan_done, NULL);  /* rafraîchit l'état */
-}
-
-static void bt_act_close(void) {
-    if (bt_act_panel) { lv_obj_delete(bt_act_panel); bt_act_panel = NULL; }
-}
-static void bt_act_close_e(lv_event_t *e) { (void)e; bt_act_close(); }
-
-/* boutons du panneau d'action : user_data = index dans bt_kept */
-static void bt_do_pair_e(lv_event_t *e) {
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    bt_act_close();
-    if (bt_status) { lv_label_set_text(bt_status, tr(STR_BT_PAIRING)); lv_obj_set_style_text_color(bt_status, lv_color_hex(CY_CYAN), 0); }
-    sys_bt_action_async("pair", bt_kept[i].addr, bt_action_done, NULL);
-}
-static void bt_do_connect_e(lv_event_t *e) {
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    bt_act_close();
-    if (bt_status) { lv_label_set_text(bt_status, tr(STR_BT_CONNECTING)); lv_obj_set_style_text_color(bt_status, lv_color_hex(CY_CYAN), 0); }
-    sys_bt_action_async("connect", bt_kept[i].addr, bt_action_done, NULL);
-}
-static void bt_do_disconnect_e(lv_event_t *e) {
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    bt_act_close();
-    sys_bt_action_async("disconnect", bt_kept[i].addr, bt_action_done, NULL);
-}
-static void bt_do_remove_e(lv_event_t *e) {
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    bt_act_close();
-    sys_bt_action_async("remove", bt_kept[i].addr, bt_action_done, NULL);
-}
-
-static void bt_row_cb(lv_event_t *e) {
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    if (i < 0 || i >= bt_kept_n) return;
-    bt_act_close();
-    bt_device_t *d = &bt_kept[i];
-    bt_act_panel = lv_obj_create(bt_ov);
-    lv_obj_set_size(bt_act_panel, LV_PCT(94), 150);
-    lv_obj_align(bt_act_panel, LV_ALIGN_CENTER, 0, 0);
-    panel(bt_act_panel, CY_CYAN);
-    lv_obj_clear_flag(bt_act_panel, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(bt_act_panel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(bt_act_panel, 6, 0);
-
-    char b[96]; snprintf(b, sizeof(b), "%s\n%s", d->name, d->addr);
-    label(bt_act_panel, b, FONT_SMALL, CY_TEXT);
-
-    lv_obj_t *row = lv_obj_create(bt_act_panel);
-    lv_obj_set_size(row, LV_PCT(100), 36);
-    flat(row); lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(row, 6, 0);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-
-    void *ud = (void *)(intptr_t)i;
-    if (d->connected) {
-        lv_obj_add_event_cb(small_button(row, tr(STR_DISCONNECT), CY_AMBER, NULL), bt_do_disconnect_e, LV_EVENT_CLICKED, ud);
-        lv_obj_add_event_cb(small_button(row, tr(STR_FORGET), CY_MAGENTA, NULL), bt_do_remove_e, LV_EVENT_CLICKED, ud);
-    } else if (d->paired) {
-        lv_obj_add_event_cb(small_button(row, tr(STR_CONNECT), CY_GREEN, NULL), bt_do_connect_e, LV_EVENT_CLICKED, ud);
-        lv_obj_add_event_cb(small_button(row, tr(STR_FORGET), CY_MAGENTA, NULL), bt_do_remove_e, LV_EVENT_CLICKED, ud);
-    } else {
-        lv_obj_add_event_cb(small_button(row, tr(STR_PAIR), CY_CYAN, NULL), bt_do_pair_e, LV_EVENT_CLICKED, ud);
-    }
-
-    lv_obj_t *row2 = lv_obj_create(bt_act_panel);
-    lv_obj_set_size(row2, LV_PCT(100), 34);
-    flat(row2); lv_obj_clear_flag(row2, LV_OBJ_FLAG_SCROLLABLE);
-    {
-        char fb[24]; snprintf(fb, sizeof(fb), LV_SYMBOL_CLOSE "  %s", tr(STR_CLOSE));
-        small_button(row2, fb, CY_DIM, bt_act_close_e);
-    }
-}
-
-static void bt_scan_done(const bt_device_t *list, int n, void *user) {
-    (void)user;
-    if (!bt_list_ov) return;
-    lv_obj_clean(bt_list_ov);
-    bt_kept_n = (n > 48) ? 48 : n;
-    for (int i = 0; i < bt_kept_n; i++) bt_kept[i] = list[i];
-    if (bt_kept_n == 0) { if (bt_status) lv_label_set_text(bt_status, tr(STR_BT_NO_DEVICE)); return; }
-    if (bt_status) lv_label_set_text(bt_status, "");
-    for (int i = 0; i < bt_kept_n; i++) {
-        bt_device_t *d = &bt_kept[i];
-        uint32_t col = d->connected ? CY_GREEN : (d->paired ? CY_CYAN : CY_BORDER);
-        lv_obj_t *r = lv_button_create(bt_list_ov);
-        lv_obj_set_size(r, LV_PCT(100), 38);
-        lv_obj_set_style_radius(r, 2, 0);
-        lv_obj_set_style_bg_opa(r, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(r, 1, 0);
-        lv_obj_set_style_border_color(r, lv_color_hex(col), 0);
-        lv_obj_set_style_shadow_width(r, 0, 0);
-        lv_obj_add_event_cb(r, bt_row_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-
-        const char *tag = d->connected ? LV_SYMBOL_OK " " : (d->paired ? LV_SYMBOL_BLUETOOTH " " : "");
-        lv_obj_t *l = label(r, "", FONT_SMALL, col == CY_BORDER ? CY_TEXT : col);
-        if (d->rssi != 0)
-            lv_label_set_text_fmt(l, "%s%s  %ddBm", tag, d->name, d->rssi);
-        else
-            lv_label_set_text_fmt(l, "%s%s", tag, d->name);
-        lv_obj_align(l, LV_ALIGN_LEFT_MID, 6, 0);
-    }
-}
-
-static void bt_serial_toggle_e(lv_event_t *e) {
-    (void)e;
-    bool on = !sys_bt_serial_active();
-    sys_bt_serial_set(on);
-    if (bt_serial_btn_lbl)
-        {
-            char cb[48]; snprintf(cb, sizeof(cb), LV_SYMBOL_USB "%s",
-                                  on ? tr(STR_BT_CONSOLE_ON) : tr(STR_BT_CONSOLE_OFF));
-            lv_label_set_text(bt_serial_btn_lbl, cb);
-        }
-    if (bt_status) {
-        lv_label_set_text(bt_status, on ? tr(STR_BT_SERIAL_VISIBLE) : tr(STR_BT_SERIAL_HIDDEN));
-        lv_obj_set_style_text_color(bt_status, lv_color_hex(on ? CY_GREEN : CY_DIM), 0);
-    }
-}
-
-static void bt_modal_open(void) {
-    bt_ov = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(bt_ov, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(bt_ov, lv_color_hex(CY_BG), 0);
-    lv_obj_set_style_bg_opa(bt_ov, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(bt_ov, 0, 0);
-    lv_obj_set_style_radius(bt_ov, 0, 0);
-    lv_obj_set_style_pad_all(bt_ov, 6, 0);
-    lv_obj_clear_flag(bt_ov, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *bar = lv_obj_create(bt_ov);
-    lv_obj_set_size(bar, LV_PCT(100), 34);
-    flat(bar); lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(bar, 6, 0);
-    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
-    {
-        char b1[32], b2[32];
-        snprintf(b1, sizeof(b1), LV_SYMBOL_LEFT    "  %s", tr(STR_CLOSE));
-        snprintf(b2, sizeof(b2), LV_SYMBOL_REFRESH "  %s", tr(STR_SCAN));
-        small_button(bar, b1, CY_DIM,  bt_modal_close_e);
-        small_button(bar, b2, CY_CYAN, bt_rescan_e);
-    }
-    bool ser = sys_bt_serial_active();
-    lv_obj_t *sbtn = small_button(bar, "", ser ? CY_GREEN : CY_DIM, bt_serial_toggle_e);
-    char sbb[48]; snprintf(sbb, sizeof(sbb), LV_SYMBOL_USB "%s",
-                            ser ? tr(STR_BT_CONSOLE_ON) : tr(STR_BT_CONSOLE_OFF));
-    bt_serial_btn_lbl = label(sbtn, sbb,
-                              FONT_SMALL, ser ? CY_GREEN : CY_TEXT);
-    lv_obj_center(bt_serial_btn_lbl);
-
-    bt_status = label(bt_ov, tr(STR_BT_SCANNING), FONT_SMALL, CY_CYAN);
-    lv_obj_align(bt_status, LV_ALIGN_TOP_MID, 0, 44);
-
-    bt_list_ov = lv_obj_create(bt_ov);
-    lv_obj_set_size(bt_list_ov, LV_PCT(100), 388);
-    lv_obj_align(bt_list_ov, LV_ALIGN_TOP_MID, 0, 70);
-    flat(bt_list_ov);
-    lv_obj_set_flex_flow(bt_list_ov, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(bt_list_ov, 4, 0);
-    lv_obj_set_scroll_dir(bt_list_ov, LV_DIR_VER);
-
-    bt_act_panel = NULL;
-    sys_bt_scan_async(bt_scan_done, NULL);
-}
-
 /* ---------------------------------------------------------------- routage */
 static void build_home(void);
-static void build_hotspot_app(void);
-/* build_badusb_app supprime : remplace par ui_badusb_build (ui_badusb.h) */
+/* build_hotspot_app : remplace par ui_hotspot_build (ui_hotspot.h) */
+/* build_badusb_app : remplace par ui_badusb_build (ui_badusb.h) */
 static void build_about(void);
 static void build_camera(void);
 static void build_gallery(void);
@@ -2281,7 +1908,7 @@ static void show_tab(int app) {
     sys_lbl_usb_state = NULL; sys_lbl_usb_ip = NULL;
     sys_lbl_bt_state = NULL; sys_lbl_bt_btn = NULL;
     sys_lbl_ssh_state = NULL; sys_lbl_ssh_btn = NULL;
-    hap_lbl_state = NULL; hap_lbl_btn = NULL;
+    ui_hotspot_reset();
     ui_badusb_reset();
     upd_lbl_state = NULL; upd_lbl_hash = NULL; upd_btn_install = NULL;
     sys_btn_usb_share = NULL; sys_btn_usb_client = NULL;
@@ -2312,7 +1939,7 @@ static void show_tab(int app) {
         case APP_CHAT:    build_chat();          break;
         case APP_NODES:   build_nodes();         break;
         case APP_SYS:     build_sys();           break;
-        case APP_HOTSPOT: build_hotspot_app();   break;
+        case APP_HOTSPOT: ui_hotspot_build();     break;
 #if CFG_BADUSB
         case APP_BADUSB:  ui_badusb_build();     break;
 #endif
@@ -2340,7 +1967,7 @@ static void show_tab(int app) {
                 lv_obj_add_flag(tb_back, LV_OBJ_FLAG_HIDDEN);
                 if (tb_name) lv_obj_align(tb_name, LV_ALIGN_LEFT_MID, 0, 0);
             }
-            bt_modal_open();
+            ui_bt_modal_open();
             break;
 #endif
         default: build_home(); break;
@@ -2489,65 +2116,6 @@ static void build_home(void) {
     lv_obj_center(ml);
 }
 
-/* ---------------------------------------------------------------- app HOTSPOT */
-static void hap_qr_cb(lv_event_t *e) { qr_open_cb(e); }
-static void hap_refresh(lv_timer_t *t) {
-    (void)t;
-    if (!hap_lbl_state) return;
-    bool on = sys_hotspot_active();
-    lv_label_set_text(hap_lbl_state, on ? tr(STR_STATE_ACTIVE) : tr(STR_STATE_INACTIVE));
-    lv_obj_set_style_text_color(hap_lbl_state, lv_color_hex(on ? CY_GREEN : CY_DIM), 0);
-    lv_label_set_text(hap_lbl_btn, on ? tr(STR_BTN_DISABLE) : tr(STR_BTN_ENABLE));
-}
-static void build_hotspot_app(void) {
-    lv_obj_t *col = lv_obj_create(content);
-    lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
-    flat(col);
-    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(col, 10, 0);
-    lv_obj_set_style_pad_row(col, 10, 0);
-    lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *title = label(col, tr(STR_HAP_TITLE), FONT_BIG, CY_MAGENTA);
-    (void)title;
-
-    lv_obj_t *r = lv_obj_create(col);
-    lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
-    flat(r); lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
-    hap_lbl_state = label(r, "?", FONT_BODY, CY_DIM);
-    lv_obj_t *btn = lv_button_create(r);
-    lv_obj_set_size(btn, 150, 32);
-    lv_obj_set_style_radius(btn, 2, 0);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_30, 0);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(CY_MAGENTA), 0);
-    lv_obj_set_style_border_width(btn, 1, 0);
-    lv_obj_set_style_border_color(btn, lv_color_hex(CY_MAGENTA), 0);
-    lv_obj_set_style_shadow_width(btn, 0, 0);
-    lv_obj_add_event_cb(btn, hot_toggle_cb, LV_EVENT_CLICKED, NULL);
-    hap_lbl_btn = label(btn, "?", FONT_SMALL, CY_TEXT);
-    lv_obj_center(hap_lbl_btn);
-
-    /* creds */
-    char credbuf[160]; snprintf(credbuf, sizeof(credbuf), "SSID  %s\npass  %s",
-                                settings_hotspot_ssid(), settings_hotspot_pass());
-    label(col, credbuf, FONT_BODY, CY_TEXT);
-
-    /* small_button utilise flex_grow=1 (utile en ROW), ici en COLUMN il s'etire :
-     * on retire le grow et on borne la hauteur */
-    char hqr[40]; snprintf(hqr, sizeof(hqr), LV_SYMBOL_IMAGE "%s", tr(STR_HAP_QR_BTN));
-    lv_obj_t *qrb = small_button(col, hqr, CY_MAGENTA, hap_qr_cb);
-    lv_obj_set_flex_grow(qrb, 0);
-    lv_obj_set_height(qrb, 38);
-    lv_obj_set_width(qrb, LV_PCT(100));
-
-    /* refresh */
-    hap_refresh(NULL);
-    sys_refresh_timer = lv_timer_create(hap_refresh, 3000, NULL);
-}
-
-/* ---------------------------------------------------------------- app BAD USB */
 /* ---------------------------------------------------------------- app A PROPOS */
 /* Petite ligne "cle : valeur" dans un panneau d'infos. */
 static void about_kv(lv_obj_t *parent, const char *k, const char *v) {
