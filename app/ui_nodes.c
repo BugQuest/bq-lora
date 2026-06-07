@@ -135,6 +135,18 @@ void ui_nodes_sync_if_visible(void) {
     if (nodes_list) nodes_sync();
 }
 
+void ui_nodes_reset(void) {
+    /* Les widgets ont ete detruits par lv_obj_clean(content) -- on null
+     * les pointeurs pour que ui_nodes_sync_if_visible devienne no-op. */
+    nodes_list = NULL;
+    nodes_sort_lbl = NULL;
+    nodes_radio_lbl = NULL;
+    s_nrow_count = 0;
+    /* s_nrows reste alloue (static) mais les pointeurs sont stale ; on
+     * remet le count a 0 pour que node_row_find/_create reparte propre
+     * au prochain build. */
+}
+
 static void nodes_sort_cb(lv_event_t *e) {
     (void)e;
     nodes_sort = !nodes_sort;
