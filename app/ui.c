@@ -1060,8 +1060,6 @@ static void log_refresh(lv_obj_t *ta) {
 }
 static void log_refresh_cb(lv_event_t *e) { (void)e; if (sys_log_ta) log_refresh(sys_log_ta); }
 
-}
-
 /* Le gestionnaire de canaux a ete extrait dans ui_chanmgr.c (ui_chanmgr_open_e). */
 
 /* hot_toggle_cb : extrait dans ui_hotspot.c */
