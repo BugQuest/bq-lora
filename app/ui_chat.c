@@ -12,7 +12,11 @@
 void show_tab(int app);
 
 /* ============================================================ */
-/* Vue CHAT : strip canaux + messages + compose                   */
+/* Vue CHAT a deux niveaux :                                      */
+/*   1. LISTE des conversations (canaux) avec details + nb recus  */
+/*   2. CHAT du canal selectionne (messages + compose)            */
+/* Le bouton retour de la topbar revient de 2 -> 1, puis 1 -> HOME*/
+/* (cf. tb_back_cb dans ui.c qui appelle ui_chat_back()).         */
 /* Etat partage (cur_chan, msg_seen, msg_seen_ch) : declare dans  */
 /* ui_common.h, defini ici (extern depuis HOME et autres modules).*/
 /* ============================================================ */
@@ -21,9 +25,15 @@ uint8_t  cur_chan = 0;
 unsigned msg_seen;
 unsigned msg_seen_ch[UI_MAX_CHANS];
 
-static lv_obj_t *msg_list;
+enum { CV_LIST = 0, CV_CHAT = 1 };
+static int s_view = CV_LIST;
+
+static lv_obj_t *conv_list;     /* niveau 1 : liste des conversations */
+static lv_obj_t *msg_list;      /* niveau 2 : bulles de messages */
 static lv_obj_t *compose_ta;
 static lv_obj_t *compose_bar;   /* barre de saisie : remontee au-dessus du clavier */
+
+/* ------------------------------------------------------------ niveau 2 : chat */
 
 static void add_bubble(lv_obj_t *parent, const mesh_message_t *m) {
     const mesh_channel_t *c = mesh_channel(m->ch);
@@ -61,6 +71,7 @@ static void add_bubble(lv_obj_t *parent, const mesh_message_t *m) {
 }
 
 static void rebuild_messages(void) {
+    if (!msg_list) return;
     lv_obj_clean(msg_list);
     int n = mesh_message_count(cur_chan);
     for (int i = 0; i < n; i++) {
@@ -69,17 +80,6 @@ static void rebuild_messages(void) {
     }
     lv_obj_t *last = lv_obj_get_child(msg_list, -1);
     if (last) lv_obj_scroll_to_view(last, LV_ANIM_OFF);
-}
-
-void ui_chat_rebuild_if_visible(void) {
-    if (cur_tab == APP_CHAT && msg_list) rebuild_messages();
-}
-
-static void chan_cb(lv_event_t *e) {
-    cur_chan = (uint8_t)(intptr_t)lv_event_get_user_data(e);
-    if (cur_chan < UI_MAX_CHANS)
-        msg_seen_ch[cur_chan] = mesh_rx_msg_count(cur_chan);
-    show_tab(APP_CHAT);
 }
 
 static void send_cb(lv_event_t *e) {
@@ -130,79 +130,39 @@ void ui_chat_kb_event_cb(lv_event_t *e) {
     compose_bar_restore();
 }
 
-void ui_chat_reset(void) {
-    lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
-    if (compose_bar) lv_obj_set_parent(compose_bar, content);
-    compose_bar = NULL;
-    compose_ta  = NULL;
-    msg_list    = NULL;
-}
-
-void ui_chat_build(void) {
-    msg_seen = mesh_rx_msg_total();
+static void build_chat_detail(void) {
     if (cur_chan < UI_MAX_CHANS)
         msg_seen_ch[cur_chan] = mesh_rx_msg_count(cur_chan);
 
-    /* rangee des canaux */
-    lv_obj_t *chans = lv_obj_create(content);
-    lv_obj_set_size(chans, LV_PCT(100), 38);
-    flat(chans);
-    lv_obj_set_flex_flow(chans, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(chans, 4, 0);
-    lv_obj_set_style_pad_all(chans, 3, 0);
-    lv_obj_clear_flag(chans, LV_OBJ_FLAG_SCROLLABLE);
+    const mesh_channel_t *c = mesh_channel(cur_chan);
+    bool enc = c ? c->enc : false;
 
-    for (int i = 0; i < mesh_channel_count(); i++) {
-        const mesh_channel_t *c = mesh_channel(i);
-        lv_obj_t *chip = lv_button_create(chans);
-        lv_obj_set_height(chip, 28);
-        lv_obj_set_style_radius(chip, 2, 0);
-        lv_obj_set_style_shadow_width(chip, 0, 0);
-        bool active = (i == cur_chan);
-        uint32_t col = c->enc ? CY_MAGENTA : CY_CYAN;
-        lv_obj_set_style_bg_opa(chip, active ? LV_OPA_30 : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_bg_color(chip, lv_color_hex(col), 0);
-        lv_obj_set_style_border_width(chip, 1, 0);
-        lv_obj_set_style_border_color(chip, lv_color_hex(active ? col : CY_BORDER), 0);
-        lv_obj_add_event_cb(chip, chan_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-        char nm[32];
-        snprintf(nm, sizeof(nm), "%s%s", c->enc ? LV_SYMBOL_EYE_CLOSE " " : "# ", c->name);
-        lv_obj_t *l = label(chip, nm, FONT_SMALL, active ? CY_TEXT : col);
-        lv_obj_center(l);
-        /* badge non-lus : petit cercle magenta avec le compte (9+) */
-        unsigned unread = 0;
-        if (i < UI_MAX_CHANS) {
-            unsigned tot = mesh_rx_msg_count((uint8_t)i);
-            if (tot > msg_seen_ch[i]) unread = tot - msg_seen_ch[i];
-        }
-        if (unread > 0) {
-            lv_obj_t *b = lv_label_create(chip);
-            char bb[8]; snprintf(bb, sizeof(bb), "%u", (unsigned)(unread > 9 ? 9 : unread));
-            if (unread > 9) strcat(bb, "+");
-            lv_label_set_text(b, bb);
-            lv_obj_set_style_text_font(b, FONT_SMALL, 0);
-            lv_obj_set_style_text_color(b, lv_color_hex(CY_TEXT), 0);
-            lv_obj_set_style_bg_color(b, lv_color_hex(CY_MAGENTA), 0);
-            lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-            lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
-            lv_obj_set_style_pad_hor(b, 4, 0);
-            lv_obj_set_style_pad_ver(b, 0, 0);
-            lv_obj_align(b, LV_ALIGN_TOP_RIGHT, 2, -3);
-        }
+    /* en-tete du canal (remplace l'ancien strip horizontal de chips) */
+    lv_obj_t *hdr = lv_obj_create(content);
+    lv_obj_set_size(hdr, LV_PCT(100), 34);
+    flat(hdr);
+    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_hor(hdr, 4, 0);
+    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+    {
+        char nm[40];
+        snprintf(nm, sizeof(nm), "%s%s",
+                 enc ? LV_SYMBOL_EYE_CLOSE " " : "# ", c ? c->name : "?");
+        label(hdr, nm, FONT_BIG, enc ? CY_MAGENTA : CY_CYAN);
+
+        lv_obj_t *mgr = lv_button_create(hdr);
+        lv_obj_set_size(mgr, 44, 28);
+        lv_obj_set_style_radius(mgr, 2, 0);
+        lv_obj_set_style_shadow_width(mgr, 0, 0);
+        lv_obj_set_style_bg_opa(mgr, LV_OPA_20, 0);
+        lv_obj_set_style_bg_color(mgr, lv_color_hex(CY_AMBER), 0);
+        lv_obj_set_style_border_width(mgr, 1, 0);
+        lv_obj_set_style_border_color(mgr, lv_color_hex(CY_AMBER), 0);
+        lv_obj_add_event_cb(mgr, ui_chanmgr_open_e, LV_EVENT_CLICKED, NULL);
+        lv_obj_center(label(mgr, LV_SYMBOL_SETTINGS, FONT_BODY, CY_AMBER));
     }
-
-    /* bouton gestion des canaux */
-    lv_obj_t *mgr = lv_button_create(chans);
-    lv_obj_set_size(mgr, 48, 30);
-    lv_obj_set_style_radius(mgr, 2, 0);
-    lv_obj_set_style_shadow_width(mgr, 0, 0);
-    lv_obj_set_style_bg_opa(mgr, LV_OPA_20, 0);
-    lv_obj_set_style_bg_color(mgr, lv_color_hex(CY_AMBER), 0);
-    lv_obj_set_style_border_width(mgr, 1, 0);
-    lv_obj_set_style_border_color(mgr, lv_color_hex(CY_AMBER), 0);
-    lv_obj_add_event_cb(mgr, ui_chanmgr_open_e, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *ml = label(mgr, LV_SYMBOL_SETTINGS, FONT_BODY, CY_AMBER);
-    lv_obj_center(ml);
 
     /* liste des messages */
     msg_list = lv_obj_create(content);
@@ -246,8 +206,152 @@ void ui_chat_build(void) {
     lv_obj_set_style_bg_color(send, lv_color_hex(CY_CYAN), 0);
     lv_obj_set_style_shadow_width(send, 0, 0);
     lv_obj_add_event_cb(send, send_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *sl = label(send, LV_SYMBOL_UPLOAD, FONT_BODY, CY_BG);
-    lv_obj_center(sl);
+    lv_obj_center(label(send, LV_SYMBOL_UPLOAD, FONT_BODY, CY_BG));
 
     rebuild_messages();
+}
+
+/* ------------------------------------------------------------ niveau 1 : liste */
+
+/* Ouvre le chat d'un canal (passe au niveau 2). */
+static void conv_cb(lv_event_t *e) {
+    cur_chan = (uint8_t)(intptr_t)lv_event_get_user_data(e);
+    if (cur_chan < UI_MAX_CHANS)
+        msg_seen_ch[cur_chan] = mesh_rx_msg_count(cur_chan);
+    s_view = CV_CHAT;
+    show_tab(APP_CHAT);
+}
+
+/* (Re)remplit conv_list avec une carte par canal. Separe du build pour pouvoir
+ * rafraichir les compteurs sans reconstruire tout l'onglet (preserve le scroll). */
+static void populate_conv_cards(void) {
+    if (!conv_list) return;
+    lv_obj_clean(conv_list);
+
+    for (int i = 0; i < mesh_channel_count(); i++) {
+        const mesh_channel_t *c = mesh_channel(i);
+        if (!c) continue;
+        uint32_t col = c->enc ? CY_MAGENTA : CY_CYAN;
+
+        lv_obj_t *card = lv_obj_create(conv_list);
+        lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
+        panel(card, c->enc ? CY_MAGENTA : CY_BORDER);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_all(card, 8, 0);
+        lv_obj_set_style_pad_row(card, 3, 0);
+        lv_obj_add_event_cb(card, conv_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+        /* ligne titre : nom + badge non-lus a droite */
+        lv_obj_t *top = lv_obj_create(card);
+        lv_obj_set_size(top, LV_PCT(100), LV_SIZE_CONTENT);
+        flat(top);
+        lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(top, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(top, LV_OBJ_FLAG_SCROLLABLE);
+
+        char nm[40];
+        snprintf(nm, sizeof(nm), "%s%s",
+                 c->enc ? LV_SYMBOL_EYE_CLOSE " " : "# ", c->name);
+        label(top, nm, FONT_BODY, col);
+
+        unsigned tot = 0, unread = 0;
+        if (i < UI_MAX_CHANS) {
+            tot = mesh_rx_msg_count((uint8_t)i);
+            if (tot > msg_seen_ch[i]) unread = tot - msg_seen_ch[i];
+        }
+        if (unread > 0) {
+            lv_obj_t *bdg = lv_label_create(top);
+            char bb[8]; snprintf(bb, sizeof(bb), "%u%s",
+                                 (unsigned)(unread > 9 ? 9 : unread), unread > 9 ? "+" : "");
+            lv_label_set_text(bdg, bb);
+            lv_obj_set_style_text_font(bdg, FONT_SMALL, 0);
+            lv_obj_set_style_text_color(bdg, lv_color_hex(CY_TEXT), 0);
+            lv_obj_set_style_bg_color(bdg, lv_color_hex(CY_MAGENTA), 0);
+            lv_obj_set_style_bg_opa(bdg, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(bdg, LV_RADIUS_CIRCLE, 0);
+            lv_obj_set_style_pad_hor(bdg, 6, 0);
+            lv_obj_set_style_pad_ver(bdg, 1, 0);
+        }
+
+        /* ligne details : type + role + nb recus */
+        const char *role = c->role == 1 ? "primaire"
+                         : c->role == 2 ? "secondaire" : "inactif";
+        char det[64];
+        snprintf(det, sizeof(det), "%s - %s - %u recus",
+                 c->enc ? "chiffre" : "public", role, tot);
+        lv_obj_t *d = label(card, det, FONT_SMALL, CY_DIM);
+        lv_obj_set_width(d, LV_PCT(100));
+    }
+}
+
+static void build_conv_list(void) {
+    /* Ouvrir la liste vaut acquittement du badge global HOME (mais pas des
+     * badges par canal, qui restent jusqu'a ouverture de chaque conversation). */
+    msg_seen = mesh_rx_msg_total();
+
+    label(content, "Conversations", FONT_BIG, CY_CYAN);
+
+    conv_list = lv_obj_create(content);
+    lv_obj_set_width(conv_list, LV_PCT(100));
+    lv_obj_set_flex_grow(conv_list, 1);
+    flat(conv_list);
+    lv_obj_set_flex_flow(conv_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(conv_list, 6, 0);
+    lv_obj_set_style_pad_all(conv_list, 2, 0);
+    lv_obj_set_scroll_dir(conv_list, LV_DIR_VER);
+    populate_conv_cards();
+
+    /* bouton gestion des canaux (pleine largeur) */
+    lv_obj_t *mbar = lv_obj_create(content);
+    lv_obj_set_size(mbar, LV_PCT(100), 38);
+    flat(mbar);
+    lv_obj_set_flex_flow(mbar, LV_FLEX_FLOW_ROW);
+    lv_obj_clear_flag(mbar, LV_OBJ_FLAG_SCROLLABLE);
+    {
+        char mb[40];
+        snprintf(mb, sizeof(mb), LV_SYMBOL_SETTINGS "  %s", tr(STR_CHANNELS_TITLE));
+        small_button(mbar, mb, CY_AMBER, ui_chanmgr_open_e);
+    }
+}
+
+/* ------------------------------------------------------------ dispatch / API */
+
+void ui_chat_build(void) {
+    msg_seen = mesh_rx_msg_total();
+    if (s_view == CV_CHAT) build_chat_detail();
+    else                   build_conv_list();
+}
+
+void ui_chat_rebuild_if_visible(void) {
+    if (cur_tab != APP_CHAT) return;
+    if (s_view == CV_CHAT) { if (msg_list)  rebuild_messages(); }
+    else                   { if (conv_list) populate_conv_cards(); }
+}
+
+/* Appele par la topbar (tb_back_cb) : si on est dans un chat, on revient a la
+ * liste des conversations et on signale qu'on a gere le retour. Sinon false ->
+ * la topbar fait le retour HOME habituel. */
+bool ui_chat_back(void) {
+    if (cur_tab == APP_CHAT && s_view == CV_CHAT) {
+        s_view = CV_LIST;
+        show_tab(APP_CHAT);
+        return true;
+    }
+    return false;
+}
+
+/* Appele quand on entre dans l'onglet CHAT depuis une autre app : on demarre
+ * toujours sur la liste des conversations. */
+void ui_chat_enter_tab(void) { s_view = CV_LIST; }
+
+void ui_chat_reset(void) {
+    lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+    if (compose_bar) lv_obj_set_parent(compose_bar, content);
+    compose_bar = NULL;
+    compose_ta  = NULL;
+    msg_list    = NULL;
+    conv_list   = NULL;
 }

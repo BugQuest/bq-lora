@@ -96,7 +96,13 @@ static lv_obj_t *home_msg_card, *home_msg_badge;
  * ui_chat.c, exposes via ui_common.h (HOME lit msg_seen pour le badge). */
 static void      update_msg_badge(void);
 
-static void tb_back_cb(lv_event_t *e) { (void)e; show_tab(APP_HOME); }
+static void tb_back_cb(lv_event_t *e) {
+    (void)e;
+    /* Dans CHAT, le retour remonte d'abord du chat vers la liste des
+     * conversations ; sinon retour HOME classique. */
+    if (cur_tab == APP_CHAT && ui_chat_back()) return;
+    show_tab(APP_HOME);
+}
 
 static int read_int_file(const char *p) {
     FILE *f = fopen(p, "r"); if (!f) return 0;
@@ -1121,6 +1127,9 @@ static void show_tab_now(int app) {
      * la replacer sous content pour qu'elle soit bien libérée par le clean */
     ui_chat_reset();          /* nullifie compose / msg_list + cache clavier */
     ui_nodes_reset();         /* nullifie nodes_list (sinon timer mesh_refresh segfault) */
+    /* Entree dans CHAT depuis une autre app -> demarre sur la liste des
+     * conversations (conv_cb met CV_CHAT et reste sur CHAT, donc pas de reset). */
+    if (app == APP_CHAT && cur_tab != APP_CHAT) ui_chat_enter_tab();
     cur_tab = app;
     lv_obj_clean(content);
 
