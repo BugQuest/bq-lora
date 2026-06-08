@@ -107,11 +107,15 @@ static void nodes_sync(void) {
         char tx[16];
         if (sf->tx_power > 0) snprintf(tx, sizeof(tx), "%ddBm", sf->tx_power);
         else                  snprintf(tx, sizeof(tx), "%s", tr(STR_TX_AUTO));
-        char rb[128];
+        char rb[160];
         snprintf(rb, sizeof(rb), LV_SYMBOL_GPS "%s", "");
         int off = (int)strlen(rb);
         snprintf(rb + off, sizeof(rb) - off, tr(STR_FMT_RADIO_LINE),
                  sf->region, sf->preset, tx, sf->hop_limit);
+        off = (int)strlen(rb);
+        const mesh_stats_t *ms = mesh_stats();
+        snprintf(rb + off, sizeof(rb) - off, "  RX:%u TX:%u NI:%u",
+                 ms->packets_rx, ms->packets_tx, ms->packets_nodeinfo);
         lv_label_set_text(nodes_radio_lbl, rb);
     }
 
@@ -147,6 +151,14 @@ void ui_nodes_reset(void) {
      * au prochain build. */
 }
 
+/* Force le re-pull de la config depuis meshtasticd (canaux, preset, region).
+ * Necessaire apres une modif externe (CLI --seturl, app mobile) car
+ * meshtasticd ne pousse pas spontanement aux clients deja connectes. */
+static void nodes_refresh_cb(lv_event_t *e) {
+    (void)e;
+    mesh_refresh_config();
+}
+
 static void nodes_sort_cb(lv_event_t *e) {
     (void)e;
     nodes_sort = !nodes_sort;
@@ -163,46 +175,60 @@ void ui_nodes_build(void) {
     nodes_list = NULL;
     nodes_radio_lbl = NULL;
 
+    /* Header agrandi : pad confortable + ligne radio bien visible.
+     * Boutons en flex_grow=1 -> ils se partagent toute la largeur disponible,
+     * pas de scroll horizontal possible quel que soit l'ecran. */
     lv_obj_t *hdr = lv_obj_create(content);
     lv_obj_set_size(hdr, LV_PCT(100), LV_SIZE_CONTENT);
     flat(hdr);
-    lv_obj_set_style_pad_all(hdr, 5, 0);
+    lv_obj_set_style_pad_all(hdr, 8, 0);
     lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(hdr, 4, 0);
+    lv_obj_set_style_pad_row(hdr, 8, 0);
+    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *brow = lv_obj_create(hdr);
-    lv_obj_set_size(brow, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_size(brow, LV_PCT(100), 36);
     flat(brow);
     lv_obj_set_flex_flow(brow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(brow, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(brow, 6, 0);
     lv_obj_clear_flag(brow, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *btn = lv_button_create(brow);
-    lv_obj_set_size(btn, 150, 28);
-    lv_obj_set_style_radius(btn, 2, 0);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(CY_PANEL2), 0);
-    lv_obj_set_style_shadow_width(btn, 0, 0);
-    lv_obj_add_event_cb(btn, nodes_sort_cb, LV_EVENT_CLICKED, NULL);
-    {
-        char b[40]; snprintf(b, sizeof(b), LV_SYMBOL_GPS "%s",
-                             tr(nodes_sort ? STR_SORT_BTN_SNR : STR_SORT_BTN_RECENT));
-        nodes_sort_lbl = label(btn, b, FONT_SMALL, CY_CYAN);
-    }
-    lv_obj_center(nodes_sort_lbl);
+    /* Helper inline : un bouton flex-grow=1, hauteur 32, fond panel2. */
+    struct { const char *txt; uint32_t col; lv_event_cb_t cb; } btns[3] = {
+        { NULL,                                CY_CYAN,  nodes_sort_cb     },
+        { LV_SYMBOL_LIST " " ,                 CY_AMBER, ui_nodes_tree_open_e },
+        { LV_SYMBOL_LOOP " Sync",              CY_GREEN, nodes_refresh_cb  },
+    };
+    /* Le 1er bouton a un texte dynamique (Recent/SNR) -> on construit a part. */
+    char sortb[40];
+    snprintf(sortb, sizeof(sortb), LV_SYMBOL_GPS " %s",
+             tr(nodes_sort ? STR_SORT_BTN_SNR : STR_SORT_BTN_RECENT));
+    btns[0].txt = sortb;
+    char treeb[32];
+    snprintf(treeb, sizeof(treeb), LV_SYMBOL_LIST " %s", tr(STR_TREE_BTN));
+    btns[1].txt = treeb;
 
-    lv_obj_t *tbtn = lv_button_create(brow);
-    lv_obj_set_size(tbtn, 110, 28);
-    lv_obj_set_style_radius(tbtn, 2, 0);
-    lv_obj_set_style_bg_color(tbtn, lv_color_hex(CY_PANEL2), 0);
-    lv_obj_set_style_shadow_width(tbtn, 0, 0);
-    lv_obj_add_event_cb(tbtn, ui_nodes_tree_open_e, LV_EVENT_CLICKED, NULL);
-    {
-        char b[24]; snprintf(b, sizeof(b), LV_SYMBOL_LIST "%s", tr(STR_TREE_BTN));
-        lv_obj_t *tl = label(tbtn, b, FONT_SMALL, CY_AMBER);
-        lv_obj_center(tl);
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *b = lv_button_create(brow);
+        lv_obj_set_height(b, 32);
+        lv_obj_set_flex_grow(b, 1);
+        lv_obj_set_style_radius(b, 4, 0);
+        lv_obj_set_style_bg_color(b, lv_color_hex(CY_PANEL2), 0);
+        lv_obj_set_style_border_color(b, lv_color_hex(btns[i].col), 0);
+        lv_obj_set_style_border_width(b, 1, 0);
+        lv_obj_set_style_shadow_width(b, 0, 0);
+        lv_obj_set_style_pad_all(b, 0, 0);
+        lv_obj_add_event_cb(b, btns[i].cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_t *l = label(b, btns[i].txt, FONT_SMALL, btns[i].col);
+        lv_obj_center(l);
+        if (i == 0) nodes_sort_lbl = l;   /* on retient le label du tri pour le toggle */
     }
 
     nodes_radio_lbl = label(hdr, "", FONT_SMALL, CY_DIM);
+    lv_obj_set_width(nodes_radio_lbl, LV_PCT(100));
+    lv_label_set_long_mode(nodes_radio_lbl, LV_LABEL_LONG_WRAP);
 
     lv_obj_t *list = lv_obj_create(content);
     lv_obj_set_width(list, LV_PCT(100));

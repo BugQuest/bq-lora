@@ -12,6 +12,7 @@
 #include "ui_about.h"
 #include "ui_nodes.h"
 #include "ui_chat.h"
+#include "ui_radio.h"
 #include "mesh.h"
 #include "calib.h"
 #include "sys.h"
@@ -78,6 +79,8 @@ static lv_obj_t *sb_usb, *sb_wifi, *sb_link, *sb_nodes, *sb_util, *sb_batt;
  * - disque >= 85% : ambre, >= 95% : magenta, avec %
  * - gadget USB en mode non-RESEAU : KEYBOARD (HID, magenta) ou DRIVE (storage, ambre)
  * Le but est de voir immediatement les pepins systeme sans aller dans l'onglet. */
+static lv_obj_t *sb_rx, *sb_rx_val;        /* icone live RX + compteur cumulatif */
+static int        sb_rx_flash_ticks;        /* ticks restants pour le clignotement */
 static lv_obj_t *sb_warn_thr_cell, *sb_warn_thr_ic;
 static lv_obj_t *sb_warn_temp_cell, *sb_warn_temp_ic, *sb_warn_temp_val;
 static lv_obj_t *sb_warn_disk_cell, *sb_warn_disk_ic, *sb_warn_disk_val;
@@ -186,6 +189,21 @@ static void statusbar_refresh(lv_timer_t *t) {
     } else {
         lv_label_set_text(sb_batt, LV_SYMBOL_CHARGE);
         lv_obj_set_style_text_color(sb_batt, lv_color_hex(CY_DIM), 0);
+    }
+
+    /* RX live : flash vert un tick a chaque paquet recu, sinon dim ; on
+     * affiche le cumul a cote pour valider que la radio capte vraiment. */
+    if (sb_rx) {
+        if (mesh_take_rx_pulse()) sb_rx_flash_ticks = 2;
+        uint32_t col = sb_rx_flash_ticks > 0 ? CY_GREEN : CY_DIM;
+        if (sb_rx_flash_ticks > 0) sb_rx_flash_ticks--;
+        lv_obj_set_style_text_color(sb_rx, lv_color_hex(col), 0);
+        if (sb_rx_val) {
+            const mesh_stats_t *ms = mesh_stats();
+            char rb[12]; snprintf(rb, sizeof(rb), "%u", ms->packets_rx);
+            lv_label_set_text(sb_rx_val, rb);
+            lv_obj_set_style_text_color(sb_rx_val, lv_color_hex(col), 0);
+        }
     }
 
     /* --- alertes systeme (cachees tant que tout va bien) --- */
@@ -339,6 +357,7 @@ static void build_statusbar(lv_obj_t *parent) {
     sb_item(sb, LV_SYMBOL_LIST, "0",  CY_DIM, &sb_nodes);            /* nb nœuds (valeur) */
     sb_item(sb, LV_SYMBOL_LOOP, "0%", CY_DIM, &sb_util);             /* util canal (valeur) */
     sb_batt = sb_item(sb, LV_SYMBOL_CHARGE, NULL, CY_DIM, NULL);     /* batterie nœud (symbole) */
+    sb_rx   = sb_item(sb, LV_SYMBOL_DOWNLOAD, "0", CY_DIM, &sb_rx_val); /* RX live + cumul */
 
     /* --- alertes systeme (cachees tant que tout va bien) --- */
     sb_warn_thr_ic       = sb_item(sb, LV_SYMBOL_WARNING, NULL, CY_MAGENTA, NULL);
@@ -883,8 +902,15 @@ static void sys_build_settings_tab(lv_obj_t *col)
 {
     lv_obj_t *s = section(col, tr(STR_SEC_SETTINGS));
     {
+        lv_obj_t *brow = lv_obj_create(s);
+        lv_obj_set_size(brow, LV_PCT(100), LV_SIZE_CONTENT);
+        flat(brow);
+        lv_obj_set_flex_flow(brow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_style_pad_column(brow, 6, 0);
+        lv_obj_clear_flag(brow, LV_OBJ_FLAG_SCROLLABLE);
         char bm[40]; snprintf(bm, sizeof(bm), LV_SYMBOL_SETTINGS "%s", tr(STR_BTN_MODIFY));
-        small_button(s, bm, CY_CYAN, ui_settings_open_e);
+        small_button(brow, bm,                          CY_CYAN,  ui_settings_open_e);
+        small_button(brow, LV_SYMBOL_WIFI " Radio",     CY_AMBER, ui_radio_open_e);
     }
     label(s, tr(STR_SETTINGS_DETAILS), FONT_SMALL, CY_DIM);
 
@@ -1439,28 +1465,29 @@ void ui_init(void) {
     /* clavier overlay sur le top layer : visible au-dessus de tout (chat + modaux) */
     kb = lv_keyboard_create(lv_layer_top());
 
-    /* AZERTY minuscules */
+    /* AZERTY minuscules — underscore + ponctuation utile sur la 4e rangee.
+     * La rangee 5 (specials) est etendue dans le mapping LV_KEYBOARD_MODE_SPECIAL. */
     static const char *kb_map_lower[] = {
         "1","2","3","4","5","6","7","8","9","0","\n",
         "a","z","e","r","t","y","u","i","o","p","\n",
         "q","s","d","f","g","h","j","k","l","m","\n",
-        "ABC","w","x","c","v","b","n","'","-",LV_SYMBOL_BACKSPACE,"\n",
-        "1#"," ",".",LV_SYMBOL_OK,""
+        "ABC","w","x","c","v","b","n","'","-","_",LV_SYMBOL_BACKSPACE,"\n",
+        "1#",":","/","@",".","?"," ",LV_SYMBOL_OK,""
     };
     /* AZERTY majuscules */
     static const char *kb_map_upper[] = {
         "1","2","3","4","5","6","7","8","9","0","\n",
         "A","Z","E","R","T","Y","U","I","O","P","\n",
         "Q","S","D","F","G","H","J","K","L","M","\n",
-        "abc","W","X","C","V","B","N","'","-",LV_SYMBOL_BACKSPACE,"\n",
-        "1#"," ",".",LV_SYMBOL_OK,""
+        "abc","W","X","C","V","B","N","'","-","_",LV_SYMBOL_BACKSPACE,"\n",
+        "1#",":","/","@",".","?"," ",LV_SYMBOL_OK,""
     };
     static const lv_buttonmatrix_ctrl_t kb_ctrl[] = {
-        1,1,1,1,1,1,1,1,1,1,
-        1,1,1,1,1,1,1,1,1,1,
-        1,1,1,1,1,1,1,1,1,1,
-        1,1,1,1,1,1,1,1,1,1,
-        2,6,1,2
+        1,1,1,1,1,1,1,1,1,1,         /* digits */
+        1,1,1,1,1,1,1,1,1,1,         /* a-p */
+        1,1,1,1,1,1,1,1,1,1,         /* q-m */
+        2,1,1,1,1,1,1,1,1,1,2,       /* shift + lettres + - _ + backspace */
+        2,1,1,1,1,1,4,2              /* 1# : / @ . ? space OK */
     };
     lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_lower, kb_ctrl);
     lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_TEXT_UPPER, kb_map_upper, kb_ctrl);
@@ -1469,6 +1496,28 @@ void ui_init(void) {
     lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(kb, ui_chat_kb_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(kb, ui_chat_kb_event_cb, LV_EVENT_CANCEL, NULL);
+
+    /* --- Theme du clavier : aligne sur la palette cyber (CY_PANEL/CY_CYAN) --- */
+    lv_obj_set_style_bg_color(kb, lv_color_hex(CY_PANEL), 0);
+    lv_obj_set_style_bg_opa(kb, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(kb, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(kb, 1, 0);
+    lv_obj_set_style_border_side(kb, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_style_radius(kb, 0, 0);
+    lv_obj_set_style_pad_all(kb, 4, 0);
+    lv_obj_set_style_pad_gap(kb, 3, 0);
+    lv_obj_set_style_text_font(kb, FONT_BODY, 0);
+    /* touches (LV_PART_ITEMS) */
+    lv_obj_set_style_bg_color(kb, lv_color_hex(CY_PANEL2), LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(kb, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_text_color(kb, lv_color_hex(CY_TEXT), LV_PART_ITEMS);
+    lv_obj_set_style_border_color(kb, lv_color_hex(CY_BORDER), LV_PART_ITEMS);
+    lv_obj_set_style_border_width(kb, 1, LV_PART_ITEMS);
+    lv_obj_set_style_radius(kb, 3, LV_PART_ITEMS);
+    lv_obj_set_style_shadow_width(kb, 0, LV_PART_ITEMS);
+    /* touche pressee : surbrillance cyan */
+    lv_obj_set_style_bg_color(kb, lv_color_hex(CY_CYAN), LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(kb, lv_color_hex(CY_BG), LV_PART_ITEMS | LV_STATE_PRESSED);
 
     show_tab(APP_HOME);
 }

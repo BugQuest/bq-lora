@@ -227,17 +227,20 @@ void ui_chat_build(void) {
     lv_textarea_set_one_line(compose_ta, true);
     lv_textarea_set_placeholder_text(compose_ta, tr(STR_CHAT_PLACEHOLDER));
     lv_obj_set_flex_grow(compose_ta, 1);
-    lv_obj_set_height(compose_ta, 30);
+    lv_obj_set_height(compose_ta, 40);
     lv_obj_set_style_bg_color(compose_ta, lv_color_hex(CY_PANEL2), 0);
-    lv_obj_set_style_border_color(compose_ta, lv_color_hex(CY_BORDER), 0);
+    lv_obj_set_style_border_color(compose_ta, lv_color_hex(CY_CYAN), 0);
     lv_obj_set_style_border_width(compose_ta, 1, 0);
-    lv_obj_set_style_radius(compose_ta, 2, 0);
+    lv_obj_set_style_radius(compose_ta, 3, 0);
+    lv_obj_set_style_pad_all(compose_ta, 8, 0);
     lv_obj_set_style_text_color(compose_ta, lv_color_hex(CY_TEXT), 0);
     lv_obj_set_style_text_font(compose_ta, FONT_BODY, 0);
+    lv_obj_set_style_border_color(compose_ta, lv_color_hex(CY_CYAN), LV_PART_CURSOR);
+    lv_obj_set_style_border_width(compose_ta, 2, LV_PART_CURSOR);
     lv_obj_add_event_cb(compose_ta, ta_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *send = lv_button_create(bar);
-    lv_obj_set_size(send, 44, 30);
+    lv_obj_set_size(send, 50, 40);
     lv_obj_set_style_radius(send, 2, 0);
     lv_obj_set_style_bg_color(send, lv_color_hex(CY_CYAN), 0);
     lv_obj_set_style_shadow_width(send, 0, 0);

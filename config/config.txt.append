@@ -29,3 +29,18 @@ dtoverlay=spi1-1cs,cs0_pin=26
 # L'auto-détection (camera_auto_detect) échoue sur ce clone -> overlay explicite.
 # Le capteur est en i2c 0x10 sur le mux CSI ; capture via rpicam-apps/libcamera.
 dtoverlay=imx219
+
+# === Bus I2C utilisateur (GPIO2=SDA1, GPIO3=SCL1) ===
+# Pour capteurs externes (BME280 environnement, IMU, OLED secondaire, etc.).
+# Adresses : BME280 = 0x76 (SDO=GND) ou 0x77 (SDO=VCC).
+dtparam=i2c_arm=on
+
+# === UART pour module GPS (NEO-6M / NEO-M8N / NEO-M9N sur GPIO14/15) ===
+# Le PL011 (vrai UART) est attribue au Bluetooth par defaut sur le Pi Zero 2 W.
+# On le bascule sur GPIO14/15 (TX/RX) pour le GPS, et BT passe sur le mini-UART
+# (suffisant pour SPP/RFCOMM). /dev/serial0 -> ttyAMA0 (PL011, GPS @ 9600 8N1).
+# Apres un dtoverlay miniuart-bt + reboot :
+#   - desactiver le getty kernel : systemctl disable serial-getty@ttyS0.service
+#   - retirer "console=serial0,115200" du cmdline.txt (optimize-boot.sh le fait deja)
+enable_uart=1
+dtoverlay=miniuart-bt

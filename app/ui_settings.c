@@ -115,18 +115,23 @@ static void set_save_cb_e(lv_event_t *e) {
 static void set_cancel_cb_e(lv_event_t *e) { (void)e; set_modal_close(); }
 
 lv_obj_t *settings_field(lv_obj_t *parent, const char *key, const char *val, bool pwd) {
-    label(parent, key, FONT_SMALL, CY_DIM);
+    label(parent, key, FONT_BODY, CY_DIM);
     lv_obj_t *ta = lv_textarea_create(parent);
     lv_textarea_set_one_line(ta, true);
     if (pwd) lv_textarea_set_password_mode(ta, true);
     lv_textarea_set_text(ta, val);
-    lv_obj_set_size(ta, LV_PCT(100), 30);
+    /* Hauteur 40 (au lieu de 30) pour confort tactile + texte non clippe. */
+    lv_obj_set_size(ta, LV_PCT(100), 40);
     lv_obj_set_style_bg_color(ta, lv_color_hex(CY_PANEL2), 0);
     lv_obj_set_style_text_color(ta, lv_color_hex(CY_TEXT), 0);
     lv_obj_set_style_text_font(ta, FONT_BODY, 0);
-    lv_obj_set_style_border_color(ta, lv_color_hex(CY_BORDER), 0);
+    lv_obj_set_style_border_color(ta, lv_color_hex(CY_CYAN), 0);
     lv_obj_set_style_border_width(ta, 1, 0);
-    lv_obj_set_style_radius(ta, 2, 0);
+    lv_obj_set_style_radius(ta, 3, 0);
+    lv_obj_set_style_pad_all(ta, 8, 0);
+    /* curseur cyan visible */
+    lv_obj_set_style_border_color(ta, lv_color_hex(CY_CYAN), LV_PART_CURSOR);
+    lv_obj_set_style_border_width(ta, 2, LV_PART_CURSOR);
     lv_obj_add_event_cb(ta, set_ta_focus_e, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(ta, set_ta_focus_e, LV_EVENT_FOCUSED, NULL);
     return ta;
