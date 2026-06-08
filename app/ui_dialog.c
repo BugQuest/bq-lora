@@ -183,3 +183,49 @@ void ui_dialog_confirm(const char *msg, void (*on_yes)(void))
     small_button(bar, LV_SYMBOL_OK    " Oui", CY_GREEN,   btn_yes_e);
     small_button(bar, LV_SYMBOL_CLOSE " Non", CY_MAGENTA, btn_close_e);
 }
+
+/* ------------------------------------------------------------ Choice (2 actions + cancel) */
+
+static void (*s_on_cb1)(void);
+static void (*s_on_cb2)(void);
+
+static void btn_cb1_e(lv_event_t *e)
+{
+    (void)e;
+    void (*cb)(void) = s_on_cb1;
+    overlay_close();
+    s_on_cb1 = NULL; s_on_cb2 = NULL;
+    if (cb) cb();
+}
+static void btn_cb2_e(lv_event_t *e)
+{
+    (void)e;
+    void (*cb)(void) = s_on_cb2;
+    overlay_close();
+    s_on_cb1 = NULL; s_on_cb2 = NULL;
+    if (cb) cb();
+}
+static void btn_cancel_e(lv_event_t *e)
+{
+    (void)e;
+    overlay_close();
+    s_on_cb1 = NULL; s_on_cb2 = NULL;
+}
+
+void ui_dialog_choice(const char *msg,
+                      const char *btn1_txt, void (*cb1)(void),
+                      const char *btn2_txt, void (*cb2)(void))
+{
+    s_on_cb1 = cb1;
+    s_on_cb2 = cb2;
+    overlay_new();
+    s_on_cb1 = cb1; s_on_cb2 = cb2; /* overlay_close() dans overlay_new a reset */
+    lv_obj_t *card = card_new(CY_AMBER);
+    title_add(card, LV_SYMBOL_POWER, "Action", CY_AMBER);
+    message_add(card, msg);
+
+    lv_obj_t *bar = button_row(card);
+    small_button(bar, btn1_txt ? btn1_txt : "1", CY_MAGENTA, btn_cb1_e);
+    small_button(bar, btn2_txt ? btn2_txt : "2", CY_AMBER,   btn_cb2_e);
+    small_button(bar, LV_SYMBOL_CLOSE,           CY_DIM,     btn_cancel_e);
+}

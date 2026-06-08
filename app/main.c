@@ -5,9 +5,11 @@
 #include "settings.h"
 #include "mesh.h"
 #include "sys.h"
+#include "pwrbtn.h"
 #include <unistd.h>
 #include <time.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 static uint32_t tick_cb(void)
 {
@@ -21,6 +23,27 @@ static uint32_t tick_cb(void)
  * l'écran doit rester allumé). */
 static bool pm_asleep = false;
 static int  pm_saved_bl = 80;
+
+/* Entree/sortie de veille exposees pour pwrbtn (appui court bascule l'etat).
+ * Symetrique a la logique deja en place dans power_save_tick(). */
+void pm_enter_sleep(void)
+{
+    if (pm_asleep) return;
+    pm_saved_bl = sys_backlight_get();
+    if (pm_saved_bl < 5) pm_saved_bl = 100;
+    sys_backlight_set(0);
+    touch_set_sleep(true);
+    pm_asleep = true;
+}
+void pm_wake(void)
+{
+    if (!pm_asleep) return;
+    sys_backlight_set(pm_saved_bl);
+    touch_set_sleep(false);
+    pm_asleep = false;
+    lv_display_trigger_activity(NULL);
+}
+bool pm_is_asleep(void) { return pm_asleep; }
 
 static void power_save_tick(void)
 {
@@ -81,6 +104,10 @@ int main(void)
 
     ui_init();
     ui_show_splash(after_splash);
+
+    /* Bouton power + LED activite (GPIO 17 + 4). Si l'init echoue (chip
+     * inaccessible, lignes occupees), l'UI continue sans : noop silencieux. */
+    pwrbtn_init();
 
     while (1) {
         mesh_poll();

@@ -27,3 +27,9 @@ void ui_dialog_error(const char *msg);
  * on_yes est appele apres fermeture de la boite (donc safe pour rouvrir
  * une autre boite depuis le callback). */
 void ui_dialog_confirm(const char *msg, void (*on_yes)(void));
+
+/* Choix entre 2 actions + annuler. Callbacks NULL autorises (= bouton inactif
+ * mais visible). Les callbacks sont appeles apres fermeture (rouverture safe). */
+void ui_dialog_choice(const char *msg,
+                      const char *btn1_txt, void (*cb1)(void),
+                      const char *btn2_txt, void (*cb2)(void));

@@ -40,6 +40,10 @@
 #define CFG_BME280 0
 #endif
 
+#ifndef CFG_PWRBTN
+#define CFG_PWRBTN 1
+#endif
+
 /* Coherence : WIFI_QR depend de CAMERA (partage le flux camera live). */
 #if CFG_WIFI_QR && !CFG_CAMERA
 #error "CFG_WIFI_QR requires CFG_CAMERA"

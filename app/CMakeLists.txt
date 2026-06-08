@@ -15,6 +15,7 @@ option(ENABLE_BADUSB    "Bad USB (gadget HID/storage + explorateur)"        ON)
 option(ENABLE_WIFI_QR   "Scanner QR WiFi (necessite ENABLE_CAMERA + libzbar)" ON)
 option(ENABLE_WPS       "WPS push-button (wpa_cli wps_pbc)"                 ON)
 option(ENABLE_BME280    "Capteur environnemental BME280 (I2C)"              OFF)
+option(ENABLE_PWRBTN    "Bouton power GPIO27 + LED RX GPIO4 (libgpiod)"      ON)
 
 if(ENABLE_WIFI_QR AND NOT ENABLE_CAMERA)
     message(FATAL_ERROR "ENABLE_WIFI_QR requires ENABLE_CAMERA (le scanner partage le flux camera)")
@@ -26,7 +27,7 @@ add_compile_definitions(LV_CONF_INCLUDE_SIMPLE)
 # Defines de configuration vers le code (le header app/config.h applique les
 # fallbacks par defaut si un flag n'est pas passe ici, pour rester safe quand
 # on compile sans CMake). 1 = active, 0 = desactive.
-foreach(mod CAMERA BLUETOOTH BADUSB WIFI_QR WPS BME280)
+foreach(mod CAMERA BLUETOOTH BADUSB WIFI_QR WPS BME280 PWRBTN)
     if(ENABLE_${mod})
         add_compile_definitions(CFG_${mod}=1)
     else()
@@ -50,6 +51,12 @@ if(ENABLE_WIFI_QR)
     list(APPEND EXTRA_LIBS ${ZBAR_LIB})
 endif()
 
+if(ENABLE_PWRBTN)
+    # libgpiod (apt: libgpiod-dev) : bouton power + LED RX via /dev/gpiochip0.
+    find_library(GPIOD_LIB gpiod REQUIRED)
+    list(APPEND EXTRA_LIBS ${GPIOD_LIB})
+endif()
+
 target_link_libraries(bq-lora-ui lvgl m pthread ${EXTRA_LIBS})
 
 # Resume des options pour le log de build
@@ -60,3 +67,4 @@ message(STATUS "  BADUSB    = ${ENABLE_BADUSB}")
 message(STATUS "  WIFI_QR   = ${ENABLE_WIFI_QR}")
 message(STATUS "  WPS       = ${ENABLE_WPS}")
 message(STATUS "  BME280    = ${ENABLE_BME280}")
+message(STATUS "  PWRBTN    = ${ENABLE_PWRBTN}")

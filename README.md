@@ -199,6 +199,42 @@ et n'a **pas de DIO3** (TCXO interne).
 | DIO2  | *non câblé* | — | laissé NC (commutateur RF géré par RXEN/TXEN) |
 | ANT   | *antenne* | — | **ne jamais émettre sans antenne 868 MHz** |
 
+### Bouton power + LED activité RX (optionnel, `ENABLE_PWRBTN`)
+
+Bouton physique sur **GPIO 27** + LED sur **GPIO 4**, pilotés en libgpiod
+depuis l'UI (`app/pwrbtn.c`). Activé par défaut. Pour désactiver à la
+compilation : `cmake -S app -B build -DENABLE_PWRBTN=OFF`.
+
+| Signal | GPIO Pi | Broche physique | Voisin GND |
+|---|---|---|---|
+| Bouton power | GPIO 27 | 13 | pin 14 |
+| LED RX       | GPIO 4  | 7  | pin 6 |
+
+**Câblage** :
+
+```
+Pin 13 (GPIO27) ─── [bouton momentané] ─── Pin 14 (GND)
+
+Pin 7  (GPIO4)  ─── [330 Ω] ── [LED anode]
+                                 [LED cathode] ─── Pin 6 (GND)
+```
+
+Pull-up interne actif sur GPIO 27 (pas de résistance externe nécessaire pour
+le bouton). La résistance 330 Ω en série avec la LED limite à ~5 mA — toute
+valeur entre 220 Ω et 470 Ω convient.
+
+**Comportements** :
+
+| Action utilisateur | Effet |
+|---|---|
+| Appui court (40 ms – 3 s) | Bascule la veille écran (off ↔ on) |
+| Appui long ≥ 3 s | Ouvre le dialogue « Redémarrer / Éteindre / Annuler » |
+| Pendant la veille | LoRa continue d'écouter, LED continue de flasher sur RX |
+| Paquet LoRa reçu | LED s'allume 150 ms (compteur RX dans NODES corrélé) |
+
+> ⚠️ **GPIO 17 n'est PAS disponible** pour un bouton : il est déjà affecté au
+> **beeper** du MKS TS35 (cf. `tools/beep.py`, gpiozero `TonalBuzzer(17)`).
+
 > **Commutateur RF.** RXEN/TXEN/DIO2 étant sortis séparément et non pontés sur ce
 > module, on pilote **RXEN et TXEN depuis deux GPIO du Pi** (config `RXen`/`TXen`,
 > comme l'E22-900M30S) plutôt que d'utiliser `DIO2_AS_RF_SWITCH` (qui exigerait de
