@@ -616,11 +616,15 @@ static void parse_packet(const uint8_t *d, size_t n)
         else pb_skip(&r, w);
     }
 
-    /* Tout MeshPacket recu compte : indicateur live + diagnostic hardware. */
-    s_stats.packets_rx++;
-    s_rx_pulse = true;
-
-    if (from && from != s_my_num) node_update_signal(from, have_snr, snr, rssi);
+    /* Seuls les paquets d'un AUTRE noeud comptent comme RX radio reel. On
+     * exclut nos propres paquets (telemetrie device, nodeinfo, routing, echos
+     * de nos messages) que meshtasticd nous renvoie aussi : sinon le compteur
+     * gonfle sans qu'on ait rien recu par les ondes (cf. num_packets_rx=0). */
+    if (from && from != s_my_num) {
+        s_stats.packets_rx++;
+        s_rx_pulse = true;
+        node_update_signal(from, have_snr, snr, rssi);
+    }
     if (dec) parse_data(dec, decl, from, to, chan, pkt_id);
 }
 

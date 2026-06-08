@@ -81,8 +81,9 @@ static lv_obj_t *sb_usb, *sb_wifi, *sb_link, *sb_nodes, *sb_util, *sb_batt;
  * - disque >= 85% : ambre, >= 95% : magenta, avec %
  * - gadget USB en mode non-RESEAU : KEYBOARD (HID, magenta) ou DRIVE (storage, ambre)
  * Le but est de voir immediatement les pepins systeme sans aller dans l'onglet. */
-static lv_obj_t *sb_rx, *sb_rx_val;        /* icone live RX + compteur cumulatif */
-static int        sb_rx_flash_ticks;        /* ticks restants pour le clignotement */
+static lv_obj_t *sb_rx, *sb_rx_val;        /* icone RX (recu d'un autre noeud) + cumul */
+static lv_obj_t *sb_tx, *sb_tx_val;        /* icone TX (trames emises) + cumul */
+static int        sb_rx_flash_ticks;        /* ticks restants pour le clignotement RX */
 static lv_obj_t *sb_warn_thr_cell, *sb_warn_thr_ic;
 static lv_obj_t *sb_warn_temp_cell, *sb_warn_temp_ic, *sb_warn_temp_val;
 static lv_obj_t *sb_warn_disk_cell, *sb_warn_disk_ic, *sb_warn_disk_val;
@@ -199,18 +200,26 @@ static void statusbar_refresh(lv_timer_t *t) {
         lv_obj_set_style_text_color(sb_batt, lv_color_hex(CY_DIM), 0);
     }
 
-    /* RX live : flash vert un tick a chaque paquet recu, sinon dim ; on
-     * affiche le cumul a cote pour valider que la radio capte vraiment. */
+    /* RX / TX separes : RX = paquets recus d'AUTRES noeuds (le compteur
+     * exclut desormais nos propres paquets), TX = trames emises. RX flashe
+     * vert un tick a chaque reception ; le cumul valide que la radio capte. */
     if (sb_rx) {
+        const mesh_stats_t *ms = mesh_stats();
         if (mesh_take_rx_pulse()) sb_rx_flash_ticks = 2;
         uint32_t col = sb_rx_flash_ticks > 0 ? CY_GREEN : CY_DIM;
         if (sb_rx_flash_ticks > 0) sb_rx_flash_ticks--;
         lv_obj_set_style_text_color(sb_rx, lv_color_hex(col), 0);
         if (sb_rx_val) {
-            const mesh_stats_t *ms = mesh_stats();
             char rb[12]; snprintf(rb, sizeof(rb), "%u", ms->packets_rx);
             lv_label_set_text(sb_rx_val, rb);
             lv_obj_set_style_text_color(sb_rx_val, lv_color_hex(col), 0);
+        }
+        if (sb_tx && sb_tx_val) {
+            uint32_t tcol = ms->packets_tx > 0 ? CY_CYAN : CY_DIM;
+            char tb[12]; snprintf(tb, sizeof(tb), "%u", ms->packets_tx);
+            lv_label_set_text(sb_tx_val, tb);
+            lv_obj_set_style_text_color(sb_tx, lv_color_hex(tcol), 0);
+            lv_obj_set_style_text_color(sb_tx_val, lv_color_hex(tcol), 0);
         }
     }
 
@@ -365,7 +374,8 @@ static void build_statusbar(lv_obj_t *parent) {
     sb_item(sb, LV_SYMBOL_LIST, "0",  CY_DIM, &sb_nodes);            /* nb nœuds (valeur) */
     sb_item(sb, LV_SYMBOL_LOOP, "0%", CY_DIM, &sb_util);             /* util canal (valeur) */
     sb_batt = sb_item(sb, LV_SYMBOL_CHARGE, NULL, CY_DIM, NULL);     /* batterie nœud (symbole) */
-    sb_rx   = sb_item(sb, LV_SYMBOL_DOWNLOAD, "0", CY_DIM, &sb_rx_val); /* RX live + cumul */
+    sb_rx   = sb_item(sb, LV_SYMBOL_DOWNLOAD, "0", CY_DIM, &sb_rx_val); /* RX (autres noeuds) + cumul */
+    sb_tx   = sb_item(sb, LV_SYMBOL_UPLOAD,   "0", CY_DIM, &sb_tx_val); /* TX (trames emises) + cumul */
 
     /* --- alertes systeme (cachees tant que tout va bien) --- */
     sb_warn_thr_ic       = sb_item(sb, LV_SYMBOL_WARNING, NULL, CY_MAGENTA, NULL);
