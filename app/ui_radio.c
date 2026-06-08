@@ -1,5 +1,6 @@
 #include "ui_common.h"
 #include "ui_radio.h"
+#include "ui_dialog.h"
 #include "mesh.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,10 +32,27 @@ typedef struct {
     int   hop;
     int   tx;
     float freq;     /* override_frequency MHz, 0.0 = utilise la freq preset */
+    char  desc[80]; /* description courte (cas d'usage du preset) */
 } radio_preset_t;
 
 static radio_preset_t s_presets[MAX_PRESETS];
 static int            s_preset_count;
+
+/* Presets installes au premier lancement (si le fichier n'existe pas).
+ * Sert de starter kit : l'utilisateur peut les charger, modifier, supprimer. */
+static const radio_preset_t kDefaultPresets[] = {
+    { "Gaulix FR",        "EU_868", "LONG_MODERATE", 3, 27, 869.4625f,
+      "Reseau Gaulix France : portee+, freq 869.4625 separee du LongFast public" },
+    { "LongFast public",  "EU_868", "LONG_FAST",     3, 27,   0.0f,
+      "Defaut mondial Meshtastic : equilibre debit/portee, 869.525 MHz" },
+    { "MediumFast",       "EU_868", "MEDIUM_FAST",   3, 27,   0.0f,
+      "Plus de debit, portee reduite (~2x latence/2)" },
+    { "ShortFast indoor", "EU_868", "SHORT_FAST",    1, 10,   0.0f,
+      "Tests rapproches en interieur, TX faible 10 dBm, hop=1" },
+    { "LongSlow DX",      "EU_868", "LONG_SLOW",     5, 27,   0.0f,
+      "Portee maximale : LoRa SF12, debit minimal, lointain/relais" },
+};
+#define DEFAULT_PRESET_COUNT (int)(sizeof(kDefaultPresets) / sizeof(kDefaultPresets[0]))
 
 /* Widgets de la modale (effaces avec l'overlay a la fermeture). */
 static lv_obj_t *r_ov;
@@ -43,24 +61,39 @@ static lv_obj_t *r_sl_hop, *r_sl_hop_lbl;
 static lv_obj_t *r_sl_tx,  *r_sl_tx_lbl;
 static lv_obj_t *r_ta_name;
 static lv_obj_t *r_ta_freq;
+static lv_obj_t *r_ta_desc;
 static lv_obj_t *r_dd_load;
+static lv_obj_t *r_desc_lbl;
 static lv_obj_t *r_status;
 
 /* ------------------------------------------------------------ helpers I/O */
+
+static void presets_save(void);   /* fwd */
+
+/* Installe les presets par defaut + persiste. Idempotent : appele uniquement
+ * si le fichier n'existe pas (premier lancement). */
+static void presets_install_defaults(void)
+{
+    s_preset_count = 0;
+    int n = DEFAULT_PRESET_COUNT;
+    if (n > MAX_PRESETS) n = MAX_PRESETS;
+    for (int i = 0; i < n; i++) s_presets[s_preset_count++] = kDefaultPresets[i];
+    presets_save();
+}
 
 static void presets_load(void)
 {
     s_preset_count = 0;
     FILE *f = fopen(RADIO_PRESETS_PATH, "r");
-    if (!f) return;
+    if (!f) { presets_install_defaults(); return; }
     char line[256];
     while (s_preset_count < MAX_PRESETS && fgets(line, sizeof(line), f)) {
         radio_preset_t p;
         memset(&p, 0, sizeof(p));
-        /* Format etendu (6 colonnes : ... freq). Si le 6e champ est absent on
-         * laisse p.freq a 0.0 -> compatibilite presets existants. */
-        int got = sscanf(line, "%23[^\t]\t%15[^\t]\t%19[^\t]\t%d\t%d\t%f",
-                         p.name, p.region, p.preset, &p.hop, &p.tx, &p.freq);
+        /* Format etendu : nom region preset hop tx [freq] [desc]
+         * Compat 5/6 colonnes : freq/desc partent a 0/"" si absents. */
+        int got = sscanf(line, "%23[^\t]\t%15[^\t]\t%19[^\t]\t%d\t%d\t%f\t%79[^\t\n]",
+                         p.name, p.region, p.preset, &p.hop, &p.tx, &p.freq, p.desc);
         if (got >= 5) s_presets[s_preset_count++] = p;
     }
     fclose(f);
@@ -73,8 +106,8 @@ static void presets_save(void)
     if (!f) return;
     for (int i = 0; i < s_preset_count; i++) {
         const radio_preset_t *p = &s_presets[i];
-        fprintf(f, "%s\t%s\t%s\t%d\t%d\t%.4f\n",
-                p->name, p->region, p->preset, p->hop, p->tx, p->freq);
+        fprintf(f, "%s\t%s\t%s\t%d\t%d\t%.4f\t%s\n",
+                p->name, p->region, p->preset, p->hop, p->tx, p->freq, p->desc);
     }
     fclose(f);
     rename(tmp, RADIO_PRESETS_PATH);
@@ -145,12 +178,18 @@ static void apply_clicked(lv_event_t *e)
              "--set lora.override_frequency %.4f "
              ">/tmp/radio_apply.log 2>&1",
              MESHTASTIC_CLI, region, preset, hop, tx, freq);
+    /* Loading visible pendant que la CLI meshtastic pousse la conf et que la
+     * radio reboot. Operation potentiellement bloquante (~1-3s). */
+    ui_dialog_loading_show("Application de la config radio...");
     int rc = system(cmd);
+    ui_dialog_loading_hide();
     if (rc == 0) {
-        status_set("Applique. Re-sync dans 2s...", CY_GREEN);
+        status_set("Applique. Re-sync...", CY_GREEN);
         mesh_refresh_config();
+        ui_dialog_info("Configuration appliquee. La radio se reconfigure.");
     } else {
-        status_set("Echec (cf /tmp/radio_apply.log)", CY_MAGENTA);
+        status_set("Echec apply", CY_MAGENTA);
+        ui_dialog_error("Echec de l'application. Voir /tmp/radio_apply.log");
     }
 }
 
@@ -158,7 +197,12 @@ static void save_clicked(lv_event_t *e)
 {
     (void)e;
     const char *name = lv_textarea_get_text(r_ta_name);
-    if (!name || !name[0]) { status_set("Nom requis", CY_AMBER); return; }
+    if (!name || !name[0]) {
+        status_set("Nom requis", CY_AMBER);
+        ui_dialog_warning("Le nom du preset est obligatoire pour sauvegarder.");
+        return;
+    }
+    ui_dialog_loading_show("Sauvegarde du preset...");
 
     radio_preset_t p;
     memset(&p, 0, sizeof(p));
@@ -170,6 +214,8 @@ static void save_clicked(lv_event_t *e)
     {
         const char *ftxt = lv_textarea_get_text(r_ta_freq);
         p.freq = (ftxt && ftxt[0]) ? strtof(ftxt, NULL) : 0.0f;
+        const char *dtxt = lv_textarea_get_text(r_ta_desc);
+        if (dtxt) snprintf(p.desc, sizeof(p.desc), "%s", dtxt);
     }
 
     /* upsert par nom */
@@ -178,14 +224,22 @@ static void save_clicked(lv_event_t *e)
         if (strcmp(s_presets[i].name, p.name) == 0) { idx = i; break; }
     if (idx < 0) {
         if (s_preset_count >= MAX_PRESETS) {
-            status_set("Limite atteinte", CY_AMBER); return;
+            ui_dialog_loading_hide();
+            status_set("Limite atteinte", CY_AMBER);
+            ui_dialog_error("Nombre maximum de presets atteint (16).");
+            return;
         }
         idx = s_preset_count++;
     }
     s_presets[idx] = p;
     presets_save();
     dd_options_presets(r_dd_load);
+    ui_dialog_loading_hide();
     status_set("Preset sauvegarde", CY_GREEN);
+    {
+        char m[96]; snprintf(m, sizeof(m), "Preset \"%s\" sauvegarde.", p.name);
+        ui_dialog_info(m);
+    }
 }
 
 static void load_changed(lv_event_t *e)
@@ -195,6 +249,7 @@ static void load_changed(lv_event_t *e)
     if (sel <= 0) return;                     /* 0 = placeholder */
     int idx = sel - 1;
     if (idx < 0 || idx >= s_preset_count) return;
+    ui_dialog_loading_show("Chargement du preset...");
     const radio_preset_t *p = &s_presets[idx];
     lv_dropdown_set_selected(r_dd_region, str_index(kRegions, p->region));
     lv_dropdown_set_selected(r_dd_preset, str_index(kPresets, p->preset));
@@ -206,13 +261,20 @@ static void load_changed(lv_event_t *e)
     lv_textarea_set_text(r_ta_name, p->name);
     if (p->freq > 0.0001f) { snprintf(b, sizeof(b), "%.4f", p->freq); lv_textarea_set_text(r_ta_freq, b); }
     else                   { lv_textarea_set_text(r_ta_freq, ""); }
+    if (r_ta_desc)  lv_textarea_set_text(r_ta_desc, p->desc);
+    if (r_desc_lbl) lv_label_set_text(r_desc_lbl, p->desc[0] ? p->desc : " ");
+    ui_dialog_loading_hide();
     status_set("Preset charge (non applique)", CY_CYAN);
+    {
+        char m[128];
+        snprintf(m, sizeof(m), "Preset \"%s\" charge.\nTape Apply pour activer.", p->name);
+        ui_dialog_info(m);
+    }
 }
 
-static void delete_clicked(lv_event_t *e)
+static void do_delete(void)
 {
-    (void)e;
-    const char *name = lv_textarea_get_text(r_ta_name);
+    const char *name = r_ta_name ? lv_textarea_get_text(r_ta_name) : NULL;
     if (!name || !name[0]) return;
     for (int i = 0; i < s_preset_count; i++) {
         if (strcmp(s_presets[i].name, name) == 0) {
@@ -222,10 +284,25 @@ static void delete_clicked(lv_event_t *e)
             presets_save();
             dd_options_presets(r_dd_load);
             status_set("Supprime", CY_AMBER);
+            ui_dialog_info("Preset supprime.");
             return;
         }
     }
     status_set("Nom inconnu", CY_AMBER);
+    ui_dialog_warning("Aucun preset de ce nom dans la liste.");
+}
+
+static void delete_clicked(lv_event_t *e)
+{
+    (void)e;
+    const char *name = lv_textarea_get_text(r_ta_name);
+    if (!name || !name[0]) {
+        ui_dialog_warning("Saisis le nom du preset a supprimer.");
+        return;
+    }
+    char m[128];
+    snprintf(m, sizeof(m), "Supprimer definitivement le preset \"%s\" ?", name);
+    ui_dialog_confirm(m, do_delete);
 }
 
 static void close_clicked(lv_event_t *e)
@@ -233,6 +310,25 @@ static void close_clicked(lv_event_t *e)
     (void)e;
     if (r_ov) { lv_obj_delete(r_ov); r_ov = NULL; }
     lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* ------------------------------------------------------------ scroll-into-view
+ * Le clavier overlay prend ~LV_PCT(55) en bas de l'ecran. Quand une TA recoit
+ * le focus, on s'assure qu'elle n'est pas sous le bord superieur du clavier
+ * en scrollant la modale (r_ov) de la difference. */
+static void radio_ta_focus_scroll(lv_event_t *e)
+{
+    lv_obj_t *ta = lv_event_get_target_obj(e);
+    if (!r_ov || !ta) return;
+    /* le clavier couvre les 55% du bas -> top utilisable = 45% */
+    lv_coord_t scr_h  = lv_display_get_vertical_resolution(NULL);
+    lv_coord_t kb_top = scr_h * 45 / 100;
+    lv_area_t a; lv_obj_get_coords(ta, &a);
+    lv_coord_t margin = 16;
+    if (a.y2 > kb_top - margin) {
+        lv_coord_t delta = (a.y2 - (kb_top - margin));
+        lv_obj_scroll_by(r_ov, 0, -delta, LV_ANIM_ON);
+    }
 }
 
 /* ------------------------------------------------------------ callbacks UI */
@@ -379,11 +475,39 @@ void ui_radio_open_e(lv_event_t *e)
     label(r_ov, "Presets", FONT_BODY, CY_AMBER);
     r_ta_name = settings_field(r_ov, "Nom du preset", "", false);
 
+    /* Description multi-ligne : textarea propre, 3 lignes visibles + wrap. */
+    label(r_ov, "Description (optionnelle)", FONT_BODY, CY_DIM);
+    r_ta_desc = lv_textarea_create(r_ov);
+    lv_textarea_set_one_line(r_ta_desc, false);
+    lv_obj_set_size(r_ta_desc, LV_PCT(100), 80);
+    lv_obj_set_style_bg_color(r_ta_desc, lv_color_hex(CY_PANEL2), 0);
+    lv_obj_set_style_text_color(r_ta_desc, lv_color_hex(CY_TEXT), 0);
+    lv_obj_set_style_text_font(r_ta_desc, FONT_BODY, 0);
+    lv_obj_set_style_border_color(r_ta_desc, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(r_ta_desc, 1, 0);
+    lv_obj_set_style_radius(r_ta_desc, 3, 0);
+    lv_obj_set_style_pad_all(r_ta_desc, 8, 0);
+    lv_obj_set_style_border_color(r_ta_desc, lv_color_hex(CY_CYAN), LV_PART_CURSOR);
+    lv_obj_set_style_border_width(r_ta_desc, 2, LV_PART_CURSOR);
+    lv_obj_add_event_cb(r_ta_desc, set_ta_focus_e, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(r_ta_desc, set_ta_focus_e, LV_EVENT_FOCUSED, NULL);
+
     row = form_row(r_ov, "Charger");
     r_dd_load = lv_dropdown_create(row);
     style_dropdown(r_dd_load);
     dd_options_presets(r_dd_load);
     lv_obj_add_event_cb(r_dd_load, load_changed, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* Description du preset charge : ligne wrap sous le dropdown */
+    r_desc_lbl = label(r_ov, " ", FONT_SMALL, CY_DIM);
+    lv_obj_set_width(r_desc_lbl, LV_PCT(100));
+    lv_label_set_long_mode(r_desc_lbl, LV_LABEL_LONG_WRAP);
+
+    /* Scroll-into-view sur chaque textarea : evite que la TA reste cachee
+     * sous le clavier lorsqu'elle prend le focus. */
+    lv_obj_add_event_cb(r_ta_name, radio_ta_focus_scroll, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(r_ta_desc, radio_ta_focus_scroll, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(r_ta_freq, radio_ta_focus_scroll, LV_EVENT_FOCUSED, NULL);
 
     /* Boutons d'action */
     lv_obj_t *bar = lv_obj_create(r_ov);
@@ -400,4 +524,11 @@ void ui_radio_open_e(lv_event_t *e)
     small_button(bar, LV_SYMBOL_CLOSE  " Close",  CY_DIM,     close_clicked);
 
     r_status = label(r_ov, "", FONT_BODY, CY_DIM);
+
+    /* Spacer fantome en bas : reserve la hauteur du clavier (~LV_PCT(55) de
+     * l'ecran) pour que le scroll-into-view puisse remonter le contenu
+     * meme quand le focus est sur la TA la plus basse. */
+    lv_obj_t *spacer = lv_obj_create(r_ov);
+    lv_obj_set_size(spacer, LV_PCT(100), 220);
+    flat(spacer);
 }

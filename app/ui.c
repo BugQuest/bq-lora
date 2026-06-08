@@ -13,6 +13,7 @@
 #include "ui_nodes.h"
 #include "ui_chat.h"
 #include "ui_radio.h"
+#include "ui_dialog.h"
 #include "mesh.h"
 #include "calib.h"
 #include "sys.h"
@@ -539,7 +540,7 @@ static void upd_apply_done_cb(bool ok, void *u) {
     if (!upd_ov) return;          /* déjà traité par upd_tick (jalon -1) */
     upd_overlay_close();
     if (!ok)
-        confirm_dialog(tr(STR_UPDATE_FAILED), NULL);
+        ui_dialog_error(tr(STR_UPDATE_FAILED));
 }
 
 /* Polled ~5x/s : lit le jalon réel et anime la barre en douceur. */
@@ -549,7 +550,7 @@ static void upd_tick(lv_timer_t *t) {
     int p = sys_update_progress();
     if (p < 0) {                 /* le script a signalé un échec */
         upd_overlay_close();
-        confirm_dialog(tr(STR_UPDATE_FAILED), NULL);
+        ui_dialog_error(tr(STR_UPDATE_FAILED));
         return;
     }
     /* rattrape vite le jalon, sinon avance lentement pour rester vivant */
@@ -1069,35 +1070,13 @@ static void build_sys(void) {
 }
 
 /* ------------- confirmation modale ------------- */
-static lv_obj_t *confirm_ov;
-static void (*confirm_yes_cb)(void);
-static void confirm_close(void) { if (confirm_ov) { lv_obj_delete(confirm_ov); confirm_ov = NULL; } }
-static void confirm_yes_e(lv_event_t *e) { (void)e; void (*cb)(void) = confirm_yes_cb; confirm_close(); if (cb) cb(); }
-static void confirm_no_e (lv_event_t *e) { (void)e; confirm_close(); }
+/* Wrapper retro-compatible : delegue aux helpers ui_dialog_*.
+ * - on_yes == NULL  -> info simple (un seul bouton OK)
+ * - on_yes != NULL  -> confirm Oui/Non avec callback
+ * Permet a tous les callers existants de beneficier du theme unifie. */
 void confirm_dialog(const char *msg, void (*on_yes)(void)) {
-    confirm_yes_cb = on_yes;
-    confirm_ov = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(confirm_ov, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(confirm_ov, lv_color_hex(CY_BG), 0);
-    lv_obj_set_style_bg_opa(confirm_ov, LV_OPA_80, 0);
-    lv_obj_set_style_border_width(confirm_ov, 0, 0);
-    lv_obj_set_style_radius(confirm_ov, 0, 0);
-    lv_obj_clear_flag(confirm_ov, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *box = lv_obj_create(confirm_ov);
-    lv_obj_set_size(box, 260, 140);
-    lv_obj_center(box);
-    panel(box, CY_CYAN);
-    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *t = label(box, msg, FONT_BODY, CY_TEXT);
-    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 6);
-    lv_obj_t *row = lv_obj_create(box);
-    lv_obj_set_size(row, LV_PCT(100), 38);
-    flat(row); lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(row, 8, 0);
-    lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    small_button(row, tr(STR_CANCEL),  CY_DIM,     confirm_no_e);
-    small_button(row, tr(STR_CONFIRM), CY_MAGENTA, confirm_yes_e);
+    if (on_yes) ui_dialog_confirm(msg, on_yes);
+    else        ui_dialog_info(msg);
 }
 
 

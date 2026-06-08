@@ -1,5 +1,6 @@
 #include "ui_common.h"
 #include "ui_node_views.h"
+#include "ui_dialog.h"
 #include "mesh.h"
 #include <stdio.h>
 #include <string.h>
@@ -42,7 +43,7 @@ static void nd_send_e(lv_event_t *e) {
     if (!txt || !txt[0]) return;
     const mesh_self_t *sf = mesh_self();
     if (sf && sf->air_tx > 10.0f) {
-        confirm_dialog(tr(STR_TX_THROTTLED), NULL);
+        ui_dialog_warning(tr(STR_TX_THROTTLED));
         return;
     }
     mesh_send_dm(nd_target_num, txt);

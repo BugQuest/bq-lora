@@ -1,5 +1,6 @@
 #include "ui_common.h"
 #include "ui_camera.h"
+#include "ui_dialog.h"
 #include "sys.h"
 #include <stdio.h>
 #include <string.h>
@@ -36,6 +37,7 @@ static void cam_stream_resume(void) {
 static void cam_capture_done(bool ok, const char *photo, const char *preview, void *user) {
     (void)preview; (void)user;
     cam_busy = false;
+    ui_dialog_loading_hide();
     if (cam_btn) lv_obj_clear_state(cam_btn, LV_STATE_DISABLED);
     if (cam_status) {
         if (ok) {
@@ -48,6 +50,13 @@ static void cam_capture_done(bool ok, const char *photo, const char *preview, vo
             lv_label_set_text(cam_status, ce);
             lv_obj_set_style_text_color(cam_status, lv_color_hex(CY_MAGENTA), 0);
         }
+    }
+    if (ok) {
+        const char *base = photo ? strrchr(photo, '/') : NULL;
+        char m[128]; snprintf(m, sizeof(m), "Photo enregistree : %s", base ? base + 1 : (photo ? photo : "?"));
+        ui_dialog_info(m);
+    } else {
+        ui_dialog_error(tr(STR_CAM_CAPTURE_FAILED));
     }
     cam_stream_resume();
 }
@@ -69,6 +78,7 @@ static void cam_capture_cb(lv_event_t *e) {
         lv_obj_set_style_text_color(cam_status, lv_color_hex(CY_AMBER), 0);
     }
     sys_cam_stream_stop();
+    ui_dialog_loading_show(tr(STR_CAM_HD_CAPTURE));
     sys_cam_capture_async(CAM_PV_W, CAM_PV_H, cam_capture_done, NULL);
 }
 

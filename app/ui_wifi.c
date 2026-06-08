@@ -1,5 +1,6 @@
 #include "ui_common.h"
 #include "ui_wifi.h"
+#include "ui_dialog.h"
 #include "sys.h"
 #include <stdio.h>
 #include <string.h>
@@ -50,9 +51,13 @@ static void wifi_rescan_e(lv_event_t *e) {
 
 static void wifi_connect_done(bool ok, const char *msg, void *user) {
     (void)user;
-    if (!wifi_status) return;
-    lv_label_set_text(wifi_status, ok ? tr(STR_WIFI_CONNECTED) : msg);
-    lv_obj_set_style_text_color(wifi_status, lv_color_hex(ok ? CY_GREEN : CY_MAGENTA), 0);
+    ui_dialog_loading_hide();
+    if (wifi_status) {
+        lv_label_set_text(wifi_status, ok ? tr(STR_WIFI_CONNECTED) : msg);
+        lv_obj_set_style_text_color(wifi_status, lv_color_hex(ok ? CY_GREEN : CY_MAGENTA), 0);
+    }
+    if (ok) ui_dialog_info(tr(STR_WIFI_CONNECTED));
+    else    ui_dialog_error(msg ? msg : "Echec connexion WiFi");
 }
 
 static void wifi_pwd_ok_e(lv_event_t *e) {
@@ -62,6 +67,7 @@ static void wifi_pwd_ok_e(lv_event_t *e) {
     if (wifi_pwd_panel) { lv_obj_delete(wifi_pwd_panel); wifi_pwd_panel = NULL; }
     lv_label_set_text(wifi_status, tr(STR_WIFI_CONNECTING));
     lv_obj_set_style_text_color(wifi_status, lv_color_hex(CY_CYAN), 0);
+    ui_dialog_loading_show(tr(STR_WIFI_CONNECTING));
     sys_wifi_connect_async(wifi_pending_ssid, p, wifi_connect_done, NULL);
 }
 static void wifi_pwd_cancel_e(lv_event_t *e) {
@@ -112,6 +118,7 @@ static void wifi_row_cb(lv_event_t *e) {
         wifi_open_pwd(n->ssid);
     } else {
         lv_label_set_text(wifi_status, tr(STR_WIFI_CONNECTING));
+        ui_dialog_loading_show(tr(STR_WIFI_CONNECTING));
         sys_wifi_connect_async(n->ssid, "", wifi_connect_done, NULL);
     }
 }
@@ -205,6 +212,7 @@ static void wifi_qr_hit_cb(const char *payload, void *user) {
             lv_label_set_text(wifi_status, b);
             lv_obj_set_style_text_color(wifi_status, lv_color_hex(CY_CYAN), 0);
         }
+        ui_dialog_loading_show(tr(STR_WIFI_CONNECTING));
         sys_wifi_connect_async(ssid, pass, wifi_connect_done, NULL);
     } else if (wifi_qr_status) {
         lv_label_set_text(wifi_qr_status, tr(STR_WIFI_QR_NOT_WIFI));

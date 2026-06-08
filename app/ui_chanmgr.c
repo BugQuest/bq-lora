@@ -1,5 +1,6 @@
 #include "ui_common.h"
 #include "ui_chanmgr.h"
+#include "ui_dialog.h"
 #include "mesh.h"
 #include "sys.h"
 #include <stdio.h>
@@ -96,7 +97,7 @@ static void cm_share_close_e(lv_event_t *e) {
 static void cm_share_e(lv_event_t *e) {
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     const char *url = mesh_channel_share_url(i);
-    if (!url) { confirm_dialog(tr(STR_SHARE_UNAVAILABLE), NULL); return; }
+    if (!url) { ui_dialog_warning(tr(STR_SHARE_UNAVAILABLE)); return; }
     const mesh_channel_t *c = mesh_channel(i);
 
     cm_share_ov = lv_obj_create(lv_layer_top());
@@ -145,8 +146,9 @@ static void cm_imp_ok_e(lv_event_t *e) {
     const char *url = lv_textarea_get_text(cm_imp_ta);
     int n = (url && url[0]) ? mesh_channel_import_url(url) : -1;
     cm_imp_close();
-    if (n < 0)      confirm_dialog(tr(STR_URL_INVALID), NULL);
-    else if (n == 0) confirm_dialog(tr(STR_NO_CHANNEL_ADDED), NULL);
+    if (n < 0)       ui_dialog_error(tr(STR_URL_INVALID));
+    else if (n == 0) ui_dialog_warning(tr(STR_NO_CHANNEL_ADDED));
+    else             ui_dialog_info(tr(STR_CHAN_ADDED));
 }
 static void cm_import_e(lv_event_t *e) {
     (void)e;
@@ -195,9 +197,9 @@ static void cm_qr_hit_cb(const char *payload, void *user) {
         char url[256]; snprintf(url, sizeof(url), "%s", payload);
         cm_qr_close();
         int n = mesh_channel_import_url(url);
-        if (n < 0)       confirm_dialog(tr(STR_URL_INVALID), NULL);
-        else if (n == 0) confirm_dialog(tr(STR_NO_CHANNEL_ADDED), NULL);
-        else             confirm_dialog(tr(STR_CHAN_ADDED), NULL);
+        if (n < 0)       ui_dialog_error(tr(STR_URL_INVALID));
+        else if (n == 0) ui_dialog_warning(tr(STR_NO_CHANNEL_ADDED));
+        else             ui_dialog_info(tr(STR_CHAN_ADDED));
     } else if (cm_qr_status) {
         lv_label_set_text(cm_qr_status, tr(STR_CHAN_QR_NOT_CHAN));
         lv_obj_set_style_text_color(cm_qr_status, lv_color_hex(CY_AMBER), 0);

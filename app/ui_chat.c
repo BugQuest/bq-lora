@@ -1,6 +1,7 @@
 #include "ui_common.h"
 #include "ui_chat.h"
 #include "ui_chanmgr.h"
+#include "ui_dialog.h"
 #include "mesh.h"
 #include <stdio.h>
 #include <string.h>
@@ -88,7 +89,7 @@ static void send_cb(lv_event_t *e) {
     /* Throttle TX : refuse l'envoi si l'air-time depasse 10% */
     const mesh_self_t *sf = mesh_self();
     if (sf && sf->air_tx > 10.0f) {
-        confirm_dialog(tr(STR_TX_THROTTLED), NULL);
+        ui_dialog_warning(tr(STR_TX_THROTTLED));
         return;
     }
     mesh_send(cur_chan, txt);

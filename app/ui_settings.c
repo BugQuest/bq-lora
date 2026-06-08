@@ -1,5 +1,6 @@
 #include "ui_common.h"
 #include "ui_settings.h"
+#include "ui_dialog.h"
 #include "settings.h"
 #include "sys.h"
 #include "mesh.h"
@@ -84,7 +85,7 @@ static void set_save_cb_e(lv_event_t *e) {
     char name[48];
     str_trim(lv_textarea_get_text(set_ta_node), name, sizeof(name));
     if (!node_name_valid(name)) {
-        confirm_dialog(tr(STR_INVALID_NODE_NAME), NULL);
+        ui_dialog_error(tr(STR_INVALID_NODE_NAME));
         return;
     }
 
@@ -109,7 +110,7 @@ static void set_save_cb_e(lv_event_t *e) {
 
     set_modal_close();
     if (offline)
-        confirm_dialog(tr(STR_NAME_SAVED_LOCAL), NULL);
+        ui_dialog_warning(tr(STR_NAME_SAVED_LOCAL));
 }
 
 static void set_cancel_cb_e(lv_event_t *e) { (void)e; set_modal_close(); }
