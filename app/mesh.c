@@ -33,8 +33,11 @@
 
 /* PortNums utiles */
 #define PORT_TEXT        1
+#define PORT_NODEINFO    4
+#define PORT_POSITION    3
 #define PORT_ROUTING     5
 #define PORT_ADMIN       6
+#define PORT_TELEMETRY   67
 
 #define HEARTBEAT_SECS   30
 #define RECONNECT_SECS   5
@@ -103,6 +106,8 @@ static mesh_self_t s_self;
 
 static uint32_t    s_my_num;
 static bool        s_dirty;
+static mesh_stats_t s_stats;
+static bool        s_rx_pulse;
 static time_t      s_reload_at;        /* != 0 : re-demander la config à cette date */
 
 /* Persistance de la liste des nœuds (trace locale, survit aux redémarrages). */
@@ -548,6 +553,17 @@ static void parse_data(const uint8_t *d, size_t n,
         add_text((int)chan, from, pkt_id, payload, pll);
     else if (portnum == PORT_ROUTING)
         ack_message(req_id);
+    else if (portnum == PORT_NODEINFO && payload && from) {
+        /* Annonce de noeud over-the-air : le payload est un User protobuf
+         * (pas un NodeInfo complet). On l'attache au slot de 'from'. */
+        node_slot_t *s = node_get_or_add(from);
+        if (s) {
+            parse_user(payload, pll, s);
+            s_nodes_save_pending = true;
+            s_dirty = true;
+        }
+        s_stats.packets_nodeinfo++;
+    }
 }
 
 static void parse_packet(const uint8_t *d, size_t n)
@@ -568,6 +584,10 @@ static void parse_packet(const uint8_t *d, size_t n)
         else if (f == 12 && w == 0 && pb_read_varint(&r, &v)) rssi = (int)(int32_t)(uint32_t)v;
         else pb_skip(&r, w);
     }
+
+    /* Tout MeshPacket recu compte : indicateur live + diagnostic hardware. */
+    s_stats.packets_rx++;
+    s_rx_pulse = true;
 
     if (from && from != s_my_num) node_update_signal(from, have_snr, snr, rssi);
     if (dec) parse_data(dec, decl, from, chan, pkt_id);
@@ -666,6 +686,9 @@ static void parse_config(const uint8_t *d, size_t n)
                     s_self.hop_limit = (uint8_t)v;
                 } else if (lf == 10 && lw == 0 && pb_read_varint(&lr, &v)) { /* tx_power dBm */
                     s_self.tx_power = (int)(int32_t)v;
+                } else if (lf == 14 && lw == 5) {                             /* override_frequency (float) */
+                    uint32_t fx;
+                    if (pb_read_fixed32(&lr, &fx)) s_self.override_freq = pb_as_float(fx);
                 } else {
                     pb_skip(&lr, lw);
                 }
@@ -766,8 +789,10 @@ void mesh_send(uint8_t ch, const char *text)
     pb_writer tw; pb_writer_init(&tw, tr, sizeof(tr));
     pb_field_bytes(&tw, 1, pkt, pw.len);
 
-    if (!dw.ovf && !pw.ovf && !tw.ovf)
+    if (!dw.ovf && !pw.ovf && !tw.ovf) {
         send_frame(tr, tw.len);
+        s_stats.packets_tx++;
+    }
 
     /* écho optimiste local (l'echo radio sera dédupliqué via id) */
     if (s_msg_count >= MAX_MSGS) {
@@ -819,7 +844,7 @@ void mesh_send_dm(uint32_t dest_num, const char *text)
     uint8_t tr[400];
     pb_writer tw; pb_writer_init(&tw, tr, sizeof(tr));
     pb_field_bytes(&tw, 1, pkt, pw.len);
-    if (!dw.ovf && !pw.ovf && !tw.ovf) send_frame(tr, tw.len);
+    if (!dw.ovf && !pw.ovf && !tw.ovf) { send_frame(tr, tw.len); s_stats.packets_tx++; }
 
     /* echo local : on l'attache au canal 0 (l'UI traitera le DM comme un */
     /* message texte sortant, avec destinataire connu via le 'to' du paquet) */
@@ -1000,6 +1025,24 @@ bool mesh_take_dirty(void)
     return d;
 }
 
+const mesh_stats_t *mesh_stats(void) { return &s_stats; }
+
+void mesh_refresh_config(void)
+{
+    if (s_fd < 0) return;
+    /* On reset s_configured pour que l'UI repasse "syncing" pendant le dump,
+     * puis bascule "ready" sur reception du config_complete_id. */
+    s_configured = false;
+    send_want_config();
+}
+
+bool mesh_take_rx_pulse(void)
+{
+    bool p = s_rx_pulse;
+    s_rx_pulse = false;
+    return p;
+}
+
 /* ----------------------------------------------------------------- accesseurs */
 int mesh_channel_count(void) { return s_chan_count; }
 
@@ -1139,7 +1182,7 @@ static void send_admin(const uint8_t *admin, size_t alen)
     pb_writer tw; pb_writer_init(&tw, tr, sizeof(tr));
     pb_field_bytes(&tw, 1, pkt, pw.len);          /* ToRadio.packet */
 
-    if (!dw.ovf && !pw.ovf && !tw.ovf) send_frame(tr, tw.len);
+    if (!dw.ovf && !pw.ovf && !tw.ovf) { send_frame(tr, tw.len); s_stats.packets_tx++; }
 }
 
 static void admin_flag(uint32_t field)            /* begin(64)/commit(65)_edit_settings */

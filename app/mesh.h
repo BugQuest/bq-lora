@@ -50,6 +50,7 @@ typedef struct {
     float       air_tx;    /* % air time TX */
     const char *uptime;    /* ex "3h 12m" */
     int         nodes;     /* nœuds vus */
+    float       override_freq; /* MHz, 0.0 = pas d'override (utilise la freq preset) */
 } mesh_self_t;
 
 int                 mesh_channel_count(void);
@@ -106,6 +107,26 @@ void                mesh_send(uint8_t ch, const char *text);
 void                mesh_send_dm(uint32_t dest_num, const char *text);
 
 const mesh_self_t  *mesh_self(void);
+
+/* Compteurs cumulatifs de paquets radio (toutes apps confondues, hors mesh-self).
+ * Sert au diagnostic hardware : si packets_rx reste a 0 longtemps alors que le
+ * lien meshtasticd est OK, c'est probablement antenne/PA/LNA. */
+typedef struct {
+    unsigned packets_rx;      /* paquets MeshPacket recus de la radio */
+    unsigned packets_rx_bad;  /* (reserve) paquets CRC-fail signales par meshtasticd */
+    unsigned packets_tx;      /* trames ToRadio emises avec succes */
+    unsigned packets_nodeinfo;/* paquets NODEINFO_APP decodes (annonces de noeuds) */
+} mesh_stats_t;
+const mesh_stats_t *mesh_stats(void);
+/* True (et reset) si un paquet RX est arrive depuis le dernier appel.
+ * Utilise pour faire clignoter une icone "live" dans la statusbar. */
+bool                mesh_take_rx_pulse(void);
+
+/* Force un re-handshake (want_config_id) pour re-tirer canaux/preset depuis
+ * meshtasticd. Utile apres une modification externe (CLI meshtastic --seturl,
+ * app mobile…) car meshtasticd ne pousse pas spontanement les changements aux
+ * clients deja connectes. No-op si la liaison n'est pas etablie. */
+void mesh_refresh_config(void);
 
 /* ---- Cycle de vie de la liaison vers meshtasticd ---- */
 void mesh_init(void);       /* ouvre la connexion API (non bloquant) */
