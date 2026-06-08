@@ -22,10 +22,12 @@ static uint32_t tick_cb(void)
  * Inhibé pendant le calibrage et le flux caméra live (pas de toucher mais
  * l'écran doit rester allumé). */
 static bool pm_asleep = false;
+static bool pm_manual = false;       /* sleep declenche par bouton (vs timeout) */
 static int  pm_saved_bl = 80;
 
 /* Entree/sortie de veille exposees pour pwrbtn (appui court bascule l'etat).
- * Symetrique a la logique deja en place dans power_save_tick(). */
+ * Le flag pm_manual empeche power_save_tick() de reveiller automatiquement
+ * la veille forcee quand le timeout d'inactivite est desactive (to <= 0). */
 void pm_enter_sleep(void)
 {
     if (pm_asleep) return;
@@ -34,6 +36,7 @@ void pm_enter_sleep(void)
     sys_backlight_set(0);
     touch_set_sleep(true);
     pm_asleep = true;
+    pm_manual = true;
 }
 void pm_wake(void)
 {
@@ -41,6 +44,7 @@ void pm_wake(void)
     sys_backlight_set(pm_saved_bl);
     touch_set_sleep(false);
     pm_asleep = false;
+    pm_manual = false;
     lv_display_trigger_activity(NULL);
 }
 bool pm_is_asleep(void) { return pm_asleep; }
@@ -49,6 +53,17 @@ static void power_save_tick(void)
 {
     int to = settings_screen_timeout();
     bool inhibit = (to <= 0) || touch_calib_mode() || sys_cam_stream_active();
+
+    /* Sleep manuel (via bouton power) : on ignore l'inhibit qui sinon
+     * forcerait un wake immediat. La sortie de veille se fait UNIQUEMENT
+     * via pm_wake() (rappui sur le bouton). */
+    if (pm_manual) {
+        if (touch_calib_mode() || sys_cam_stream_active()) {
+            /* calib / camera : on revoque le sleep manuel par securite */
+            pm_wake();
+        }
+        return;
+    }
 
     if (inhibit) {
         if (pm_asleep) {

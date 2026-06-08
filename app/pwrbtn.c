@@ -20,10 +20,14 @@
 #define GPIO_CHIP        "/dev/gpiochip0"
 #define BTN_OFFSET       27        /* pin 13 (GPIO17 deja pris par le buzzer) */
 #define LED_OFFSET       4         /* pin 7 */
-#define POLL_PERIOD_MS   30      /* assez fin pour debounce + reactif au tap */
-#define DEBOUNCE_MS      40      /* press doit durer 40ms minimum */
+/* Polling lent (100 ms = 10 Hz) : un polling rapide (30 Hz) etait audible via
+ * le buzzer piezo GPIO17 adjacent (couplage capacitif inter-pin). 100 ms reste
+ * largement reactif pour un bouton physique (latence max 200 ms = inaudible
+ * a l'usage) et le polling ne couple plus a frequence audible. */
+#define POLL_PERIOD_MS   100
+#define DEBOUNCE_MS      60      /* > 1 echantillon, < tap normal */
 #define LONG_PRESS_MS    3000    /* >= 3s = ouvre dialogue power */
-#define LED_PULSE_MS     150     /* duree d'allumage LED par paquet RX */
+#define LED_PULSE_MS     200     /* duree d'allumage LED par paquet RX */
 
 /* Etats du bouton (machine a etats simple). */
 typedef enum {
@@ -53,8 +57,12 @@ static bool request_input_pullup(unsigned int offset, struct gpiod_line_request 
     struct gpiod_line_settings *ls = gpiod_line_settings_new();
     if (!ls) return false;
     gpiod_line_settings_set_direction(ls, GPIOD_LINE_DIRECTION_INPUT);
-    gpiod_line_settings_set_bias(ls, GPIOD_LINE_BIAS_PULL_UP);
-    gpiod_line_settings_set_active_low(ls, true);  /* presse = ACTIVE */
+    /* PAS de pull-up INTERNE : sur ce HW (Pi Zero 2 W + MKS TS35), activer
+     * le pull-up BCM2835 sur GPIO27 (pin 13) couple capacitivement vers le
+     * buzzer piezo (GPIO17/pin 11 adjacent) et fait siffler le piezo en
+     * permanence. Solution : pull-up EXTERNE 10k entre GPIO27 et 3.3V,
+     * et bias laisse DISABLED ici. */
+    gpiod_line_settings_set_bias(ls, GPIOD_LINE_BIAS_DISABLED);
 
     struct gpiod_line_config *lc = gpiod_line_config_new();
     if (!lc) { gpiod_line_settings_free(ls); return false; }
@@ -97,7 +105,7 @@ static bool btn_is_pressed(void)
 {
     if (!s_btn_req) return false;
     enum gpiod_line_value v = gpiod_line_request_get_value(s_btn_req, BTN_OFFSET);
-    return v == GPIOD_LINE_VALUE_ACTIVE;
+    return v == GPIOD_LINE_VALUE_INACTIVE;  /* INACTIVE = ligne LOW = bouton vers GND */
 }
 
 static void led_set(bool on)

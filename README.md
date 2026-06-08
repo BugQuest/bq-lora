@@ -213,15 +213,22 @@ compilation : `cmake -S app -B build -DENABLE_PWRBTN=OFF`.
 **Câblage** :
 
 ```
-Pin 13 (GPIO27) ─── [bouton momentané] ─── Pin 14 (GND)
+Pin 1  (3.3V) ── [10 kΩ pull-up externe] ──┬── Pin 13 (GPIO27)
+                                            │
+                                            └── [bouton momentané] ── Pin 14 (GND)
 
 Pin 7  (GPIO4)  ─── [330 Ω] ── [LED anode]
                                  [LED cathode] ─── Pin 6 (GND)
 ```
 
-Pull-up interne actif sur GPIO 27 (pas de résistance externe nécessaire pour
-le bouton). La résistance 330 Ω en série avec la LED limite à ~5 mA — toute
-valeur entre 220 Ω et 470 Ω convient.
+> ⚠️ **Pull-up EXTERNE obligatoire** (résistance 10 kΩ entre GPIO 27 et 3.3V).
+> Sur le MKS TS35 + Pi Zero 2 W, activer le pull-up *interne* du BCM2835 sur
+> GPIO 27 (pin 13) couple capacitivement vers le **buzzer piezo** câblé sur
+> GPIO 17 (pin 11 adjacente) et fait siffler en permanence. Le pull-up
+> externe (4.7 kΩ – 100 kΩ acceptable) supprime totalement ce couplage.
+
+La résistance **330 Ω** en série avec la LED limite le courant à ~5 mA —
+toute valeur entre 220 Ω et 470 Ω convient.
 
 **Comportements** :
 
