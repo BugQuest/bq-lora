@@ -96,6 +96,22 @@ int                 mesh_node_history(uint32_t num, int8_t *out_snr, int16_t *ou
 int                 mesh_message_count(uint8_t ch);
 const mesh_message_t *mesh_message(uint8_t ch, int idx);
 
+/* Epoch (s) du dernier message d'un canal (broadcast), 0 si aucun. Tri par
+ * activite recente de la liste des conversations. */
+uint32_t            mesh_conv_last_epoch(uint8_t ch);
+
+/* ---- Fils de discussion prives (DM), bucketises par num de correspondant ----
+ * Un message est un DM s'il a ete adresse specifiquement (champ "to" != bcast).
+ * Ces fils sont distincts des canaux : mesh_message()/mesh_message_count()
+ * n'incluent JAMAIS les DM. */
+int                 mesh_dm_count(void);            /* correspondants distincts */
+uint32_t            mesh_dm_peer(int idx);          /* num du i-eme correspondant */
+const char         *mesh_dm_peer_name(uint32_t peer); /* nom du noeud, NULL si inconnu */
+int                 mesh_dm_message_count(uint32_t peer);
+const mesh_message_t *mesh_dm_message(uint32_t peer, int idx);
+unsigned            mesh_dm_rx_count(uint32_t peer); /* messages recus du peer */
+uint32_t            mesh_dm_last_epoch(uint32_t peer);
+
 /* Compteur cumulatif de messages texte REÇUS (hors les nôtres), monotone depuis
  * le lancement. L'UI en garde une copie "lue" pour calculer les non-lus. */
 unsigned            mesh_rx_msg_total(void);

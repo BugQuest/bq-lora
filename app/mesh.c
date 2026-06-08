@@ -81,6 +81,8 @@ typedef struct {
     char           from[40];
     char           time[12];
     uint32_t       id;      /* id du paquet (dédup + ACK) */
+    uint32_t       peer;    /* DM : num du correspondant ; 0 = canal/broadcast */
+    uint32_t       epoch;   /* horodatage epoch (tri par activite recente) */
 } msg_slot_t;
 
 static node_slot_t s_nodes[MAX_NODES];
@@ -239,15 +241,15 @@ static void mesh_msgs_save(void)
     snprintf(tmp, sizeof(tmp), "%s.tmp", MSGS_DB_PATH);
     FILE *f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "# bq-lora-ui messages v1: time\\tch\\tout\\tack\\tfrom\\ttext\n");
+    fprintf(f, "# bq-lora-ui messages v2: time\\tch\\tout\\tack\\tpeer\\tepoch\\tfrom\\ttext\n");
     char fbuf[80], tbuf[200];
     for (int i = 0; i < s_msg_count; i++) {
         msg_slot_t *s = &s_msgs[i];
         escape_tsv(fbuf, sizeof(fbuf), s->from);
         escape_tsv(tbuf, sizeof(tbuf), s->m.text);
-        fprintf(f, "%s\t%u\t%u\t%u\t%s\t%s\n",
+        fprintf(f, "%s\t%u\t%u\t%u\t%u\t%u\t%s\t%s\n",
                 s->time, (unsigned)s->m.ch, (unsigned)s->m.out, (unsigned)s->m.ack,
-                fbuf, tbuf);
+                (unsigned)s->peer, (unsigned)s->epoch, fbuf, tbuf);
     }
     fclose(f);
     rename(tmp, MSGS_DB_PATH);
@@ -262,8 +264,11 @@ static void mesh_msgs_load(void)
     char line[400];
     while (fgets(line, sizeof(line), f) && s_msg_count < MAX_MSGS) {
         if (line[0] == '#' || line[0] == '\n') continue;
-        char *c[6];
-        if (split_tabs(line, c, 6) < 6) continue;
+        /* Compat : v1 = 6 colonnes (sans peer/epoch), v2 = 8 colonnes.
+         * On split en 8 ; le nombre de champs detecte distingue les formats. */
+        char *c[8];
+        int nf = split_tabs(line, c, 8);
+        if (nf < 6) continue;
         msg_slot_t *s = &s_msgs[s_msg_count++];
         memset(s, 0, sizeof(*s));
         snprintf(s->time, sizeof(s->time), "%s", c[0]);
@@ -271,11 +276,21 @@ static void mesh_msgs_load(void)
         s->m.ch   = (uint8_t)atoi(c[1]);
         s->m.out  = atoi(c[2]) ? true : false;
         s->m.ack  = (uint8_t)atoi(c[3]);
-        snprintf(s->from, sizeof(s->from), "%s", c[4]);
+        const char *from, *text;
+        if (nf >= 8) {                       /* v2 : peer + epoch presents */
+            s->peer  = (uint32_t)strtoul(c[4], NULL, 10);
+            s->epoch = (uint32_t)strtoul(c[5], NULL, 10);
+            from = c[6];
+            text = c[7];
+        } else {                             /* v1 : pas de peer/epoch */
+            from = c[4];
+            text = c[5];
+        }
+        snprintf(s->from, sizeof(s->from), "%s", from);
         s->m.from = s->from;
-        size_t n = strlen(c[5]);
+        size_t n = strlen(text);
         if (n >= sizeof(s->m.text)) n = sizeof(s->m.text) - 1;
-        memcpy(s->m.text, c[5], n);
+        memcpy(s->m.text, text, n);
         s->m.text[n] = '\0';
     }
     fclose(f);
@@ -389,7 +404,7 @@ static int chan_pos_from_index(int index)
 }
 
 /* ----------------------------------------------------------------- messages */
-static void add_text(int chan_index, uint32_t from, uint32_t id,
+static void add_text(int chan_index, uint32_t from, uint32_t to, uint32_t id,
                      const uint8_t *txt, size_t len)
 {
     /* dédup : si un message porte déjà cet id (echo de notre propre TX,
@@ -404,11 +419,23 @@ static void add_text(int chan_index, uint32_t from, uint32_t id,
         s_msg_count--;
     }
 
+    /* DM : un paquet adresse specifiquement (to != broadcast) implique un fil
+     * de discussion prive. peer = l'autre partie (l'expediteur si c'est pour
+     * nous, le destinataire si c'est nous qui parlons). */
+    bool out = (from == s_my_num && s_my_num);
+    uint32_t peer = 0;
+    if (to && to != BROADCAST_ADDR) {
+        peer = out ? to : from;
+    }
+
     msg_slot_t *m = &s_msgs[s_msg_count++];
     memset(m, 0, sizeof(*m));
     m->id = id;
+    m->peer = peer;
     m->m.ch = (uint8_t)chan_pos_from_index(chan_index);
 
+    /* Pour un DM entrant, "from" affiche reste l'expediteur ; pour un DM
+     * sortant capte par l'echo radio, on garde aussi le vrai expediteur. */
     const char *nm = node_name(from);
     if (nm) snprintf(m->from, sizeof(m->from), "%s", nm);
     else    snprintf(m->from, sizeof(m->from), "!%08x", from);
@@ -418,14 +445,17 @@ static void add_text(int chan_index, uint32_t from, uint32_t id,
     memcpy(m->m.text, txt, n);
     m->m.text[n] = '\0';
 
+    m->epoch = (uint32_t)time(NULL);
     fmt_clock(m->time, sizeof(m->time));
     m->m.time = m->time;
 
-    m->m.out = (from == s_my_num && s_my_num);
+    m->m.out = out;
     m->m.ack = m->m.out ? 1 : 0;
     if (!m->m.out) {
         s_rx_total++;                /* message entrant -> incremente les non-lus */
-        if (m->m.ch < MAX_CHANS) s_rx_per_ch[m->m.ch]++;
+        /* Les DM ne comptent pas dans les badges par canal (compteur dedie
+         * cote accesseur via mesh_dm_rx_count), seulement le total global. */
+        if (!peer && m->m.ch < MAX_CHANS) s_rx_per_ch[m->m.ch]++;
     }
     s_msgs_save_pending = true;      /* persistance differee */
     s_dirty = true;
@@ -534,7 +564,7 @@ static void parse_nodeinfo(const uint8_t *d, size_t n)
 }
 
 static void parse_data(const uint8_t *d, size_t n,
-                       uint32_t from, uint32_t chan, uint32_t pkt_id)
+                       uint32_t from, uint32_t to, uint32_t chan, uint32_t pkt_id)
 {
     pb_reader r; pb_reader_init(&r, d, n);
     uint32_t f, w;
@@ -550,7 +580,7 @@ static void parse_data(const uint8_t *d, size_t n,
     }
 
     if (portnum == PORT_TEXT && payload)
-        add_text((int)chan, from, pkt_id, payload, pll);
+        add_text((int)chan, from, to, pkt_id, payload, pll);
     else if (portnum == PORT_ROUTING)
         ack_message(req_id);
     else if (portnum == PORT_NODEINFO && payload && from) {
@@ -570,13 +600,14 @@ static void parse_packet(const uint8_t *d, size_t n)
 {
     pb_reader r; pb_reader_init(&r, d, n);
     uint32_t f, w;
-    uint32_t from = 0, chan = 0, pkt_id = 0;
+    uint32_t from = 0, to = 0, chan = 0, pkt_id = 0;
     int rssi = 0; float snr = 0; bool have_snr = false;
     const uint8_t *dec = NULL; size_t decl = 0;
 
     while (pb_read_tag(&r, &f, &w)) {
         uint64_t v; uint32_t fx; const uint8_t *b; size_t bl;
         if (f == 1 && w == 5 && pb_read_fixed32(&r, &fx)) from = fx;
+        else if (f == 2 && w == 5 && pb_read_fixed32(&r, &fx)) to = fx;
         else if (f == 3 && w == 0 && pb_read_varint(&r, &v)) chan = (uint32_t)v;
         else if (f == 4 && w == 2 && pb_read_bytes(&r, &b, &bl)) { dec = b; decl = bl; }
         else if (f == 6 && w == 5 && pb_read_fixed32(&r, &fx)) pkt_id = fx;
@@ -590,7 +621,7 @@ static void parse_packet(const uint8_t *d, size_t n)
     s_rx_pulse = true;
 
     if (from && from != s_my_num) node_update_signal(from, have_snr, snr, rssi);
-    if (dec) parse_data(dec, decl, from, chan, pkt_id);
+    if (dec) parse_data(dec, decl, from, to, chan, pkt_id);
 }
 
 static void parse_channel(const uint8_t *d, size_t n)
@@ -807,6 +838,7 @@ void mesh_send(uint8_t ch, const char *text)
     m->m.from = m->from;
     memcpy(m->m.text, text, tlen);
     m->m.text[tlen] = '\0';
+    m->epoch = (uint32_t)time(NULL);
     fmt_clock(m->time, sizeof(m->time));
     m->m.time = m->time;
     m->m.out = true;
@@ -846,8 +878,8 @@ void mesh_send_dm(uint32_t dest_num, const char *text)
     pb_field_bytes(&tw, 1, pkt, pw.len);
     if (!dw.ovf && !pw.ovf && !tw.ovf) { send_frame(tr, tw.len); s_stats.packets_tx++; }
 
-    /* echo local : on l'attache au canal 0 (l'UI traitera le DM comme un */
-    /* message texte sortant, avec destinataire connu via le 'to' du paquet) */
+    /* echo local : message sortant rattache au fil DM (peer = dest_num).
+     * from = notre propre nom (message sortant), l'UI bucketise par peer. */
     if (s_msg_count >= MAX_MSGS) {
         memmove(&s_msgs[0], &s_msgs[1], sizeof(s_msgs[0]) * (MAX_MSGS - 1));
         s_msg_count--;
@@ -856,12 +888,12 @@ void mesh_send_dm(uint32_t dest_num, const char *text)
     memset(m, 0, sizeof(*m));
     m->id = id;
     m->m.ch = 0;
-    const char *nm = node_name(dest_num);
-    if (nm) snprintf(m->from, sizeof(m->from), "%s", nm);
-    else    snprintf(m->from, sizeof(m->from), "!%08x", dest_num);
+    m->peer = dest_num;
+    snprintf(m->from, sizeof(m->from), "%s", settings_node_name());
     m->m.from = m->from;
     memcpy(m->m.text, text, tlen);
     m->m.text[tlen] = '\0';
+    m->epoch = (uint32_t)time(NULL);
     fmt_clock(m->time, sizeof(m->time));
     m->m.time = m->time;
     m->m.out = true;
@@ -1076,7 +1108,7 @@ int mesh_message_count(uint8_t ch)
 {
     int n = 0;
     for (int i = 0; i < s_msg_count; i++)
-        if (s_msgs[i].m.ch == ch) n++;
+        if (s_msgs[i].m.ch == ch && s_msgs[i].peer == 0) n++;
     return n;
 }
 
@@ -1084,12 +1116,102 @@ const mesh_message_t *mesh_message(uint8_t ch, int idx)
 {
     int n = 0;
     for (int i = 0; i < s_msg_count; i++) {
-        if (s_msgs[i].m.ch == ch) {
+        if (s_msgs[i].m.ch == ch && s_msgs[i].peer == 0) {
             if (n == idx) return &s_msgs[i].m;
             n++;
         }
     }
     return NULL;
+}
+
+/* Epoch du dernier message d'un canal (broadcast, peer==0). 0 si aucun.
+ * Sert au tri des conversations par activite recente (#3). */
+uint32_t mesh_conv_last_epoch(uint8_t ch)
+{
+    uint32_t e = 0;
+    for (int i = 0; i < s_msg_count; i++)
+        if (s_msgs[i].m.ch == ch && s_msgs[i].peer == 0) e = s_msgs[i].epoch;
+    return e;
+}
+
+/* ---- Fils de discussion prives (DM) : bucketises par num de correspondant. */
+
+/* Nombre de correspondants DM distincts (peer != 0). */
+int mesh_dm_count(void)
+{
+    int n = 0;
+    for (int i = 0; i < s_msg_count; i++) {
+        uint32_t p = s_msgs[i].peer;
+        if (!p) continue;
+        bool seen = false;
+        for (int j = 0; j < i; j++)
+            if (s_msgs[j].peer == p) { seen = true; break; }
+        if (!seen) n++;
+    }
+    return n;
+}
+
+/* num du i-eme correspondant DM distinct (ordre de premiere apparition). */
+uint32_t mesh_dm_peer(int idx)
+{
+    int n = 0;
+    for (int i = 0; i < s_msg_count; i++) {
+        uint32_t p = s_msgs[i].peer;
+        if (!p) continue;
+        bool seen = false;
+        for (int j = 0; j < i; j++)
+            if (s_msgs[j].peer == p) { seen = true; break; }
+        if (seen) continue;
+        if (n == idx) return p;
+        n++;
+    }
+    return 0;
+}
+
+const char *mesh_dm_peer_name(uint32_t peer)
+{
+    const char *nm = node_name(peer);
+    return nm ? nm : NULL;
+}
+
+int mesh_dm_message_count(uint32_t peer)
+{
+    if (!peer) return 0;
+    int n = 0;
+    for (int i = 0; i < s_msg_count; i++)
+        if (s_msgs[i].peer == peer) n++;
+    return n;
+}
+
+const mesh_message_t *mesh_dm_message(uint32_t peer, int idx)
+{
+    if (!peer) return NULL;
+    int n = 0;
+    for (int i = 0; i < s_msg_count; i++) {
+        if (s_msgs[i].peer == peer) {
+            if (n == idx) return &s_msgs[i].m;
+            n++;
+        }
+    }
+    return NULL;
+}
+
+/* Messages DM recus (entrants) d'un correspondant : sert au compteur "recus". */
+unsigned mesh_dm_rx_count(uint32_t peer)
+{
+    if (!peer) return 0;
+    unsigned n = 0;
+    for (int i = 0; i < s_msg_count; i++)
+        if (s_msgs[i].peer == peer && !s_msgs[i].m.out) n++;
+    return n;
+}
+
+uint32_t mesh_dm_last_epoch(uint32_t peer)
+{
+    uint32_t e = 0;
+    for (int i = 0; i < s_msg_count; i++)
+        if (s_msgs[i].peer == peer) e = s_msgs[i].epoch;
+    return e;
 }
 
 const mesh_self_t *mesh_self(void)

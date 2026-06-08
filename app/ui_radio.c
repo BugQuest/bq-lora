@@ -225,9 +225,43 @@ static void deferred_apply_do(lv_timer_t *t)
     }
 }
 
-static void apply_clicked(lv_event_t *e)
+/* Plage de frequences (MHz) autorisee par region, pour la validation #6.
+ * Valeurs approximatives (bandes ISM larges) : sert a alerter l'utilisateur
+ * d'un override manifestement hors bande, pas a faire respecter la loi. */
+typedef struct { const char *region; float lo; float hi; } region_band_t;
+static const region_band_t kRegionBands[] = {
+    { "EU_868", 863.0f, 870.0f }, { "EU_433", 433.0f, 434.8f },
+    { "US",     902.0f, 928.0f }, { "ANZ",    915.0f, 928.0f },
+    { "JP",     920.0f, 928.0f }, { "KR",     920.0f, 923.0f },
+    { "TW",     920.0f, 925.0f }, { "RU",     868.7f, 869.2f },
+    { "IN",     865.0f, 867.0f }, { "NZ_865", 864.0f, 868.0f },
+    { "TH",     920.0f, 925.0f }, { "UA_433", 433.0f, 434.8f },
+    { "UA_868", 868.0f, 868.6f }, { "MY_433", 433.0f, 435.0f },
+    { "MY_919", 919.0f, 924.0f }, { "SG_923", 917.0f, 925.0f },
+};
+#define REGION_BANDS_N ((int)(sizeof(kRegionBands)/sizeof(kRegionBands[0])))
+
+/* True si freq (MHz, >0) est hors de la bande connue de region.
+ * False si freq <= 0 (pas d'override) ou region inconnue (pas d'avis). */
+static bool freq_out_of_band(const char *region, float freq, float *lo, float *hi)
 {
-    (void)e;
+    if (freq <= 0.0001f) return false;
+    for (int i = 0; i < REGION_BANDS_N; i++) {
+        if (strcmp(kRegionBands[i].region, region) == 0) {
+            if (lo) *lo = kRegionBands[i].lo;
+            if (hi) *hi = kRegionBands[i].hi;
+            return (freq < kRegionBands[i].lo || freq > kRegionBands[i].hi);
+        }
+    }
+    return false;
+}
+
+/* Construit la commande CLI et lance l'application (differee 50ms pour laisser
+ * LVGL rendre le spinner). Lit les widgets a l'instant T : sert aussi de
+ * callback de confirmation (signature void(void)), la modale etant encore
+ * ouverte quand le confirm se ferme. */
+static void do_apply(void)
+{
     char region[16], preset[20];
     lv_dropdown_get_selected_str(r_dd_region, region, sizeof(region));
     lv_dropdown_get_selected_str(r_dd_preset, preset, sizeof(preset));
@@ -237,34 +271,74 @@ static void apply_clicked(lv_event_t *e)
     const char *ftxt = lv_textarea_get_text(r_ta_freq);
     if (ftxt && ftxt[0]) freq = strtof(ftxt, NULL);
 
-    /* Canaux lies : si une URL de canaux est presente, on l'applique via
-     * --seturl DANS LA MEME invocation -> changer de config radio bascule
-     * aussi les canaux. --seturl remplace l'ensemble des canaux ; les --set
-     * lora.* qui suivent forcent region/hop/tx/freq selon le formulaire. */
-    char seturl[420] = "";
+    /* #5 source unique : si une URL de canaux est presente, on applique
+     * UNIQUEMENT --seturl. L'URL (ChannelSet) embarque sa propre LoRaConfig
+     * (region/preset/freq), donc un seul appel CLI = un seul reboot, pas de
+     * conflit --seturl/--set. Sans URL, on configure la radio champ par champ
+     * via --set lora.*. */
     const char *ctxt = lv_textarea_get_text(r_ta_chans);
-    if (ctxt && ctxt[0])
-        snprintf(seturl, sizeof(seturl), "--seturl '%s' ", ctxt);
+    bool has_chans = (ctxt && ctxt[0]);
 
-    /* On stash la commande pour qu'un timer one-shot l'execute apres
-     * que lvgl ait eu le temps de rendre le loading. system() bloque
-     * 1-3s, on ne peut pas le faire inline ou le spinner n'apparait jamais. */
-    snprintf(s_deferred_apply_cmd, sizeof(s_deferred_apply_cmd),
-             "%s --host 127.0.0.1 "
-             "%s"
-             "--set lora.region %s "
-             "--set lora.modem_preset %s "
-             "--set lora.use_preset true "
-             "--set lora.hop_limit %d "
-             "--set lora.tx_power %d "
-             "--set lora.override_frequency %.4f "
-             ">/tmp/radio_apply.log 2>&1",
-             MESHTASTIC_CLI, seturl, region, preset, hop, tx, freq);
+    if (has_chans) {
+        snprintf(s_deferred_apply_cmd, sizeof(s_deferred_apply_cmd),
+                 "%s --host 127.0.0.1 --seturl '%s' "
+                 ">/tmp/radio_apply.log 2>&1",
+                 MESHTASTIC_CLI, ctxt);
+    } else {
+        snprintf(s_deferred_apply_cmd, sizeof(s_deferred_apply_cmd),
+                 "%s --host 127.0.0.1 "
+                 "--set lora.region %s "
+                 "--set lora.modem_preset %s "
+                 "--set lora.use_preset true "
+                 "--set lora.hop_limit %d "
+                 "--set lora.tx_power %d "
+                 "--set lora.override_frequency %.4f "
+                 ">/tmp/radio_apply.log 2>&1",
+                 MESHTASTIC_CLI, region, preset, hop, tx, freq);
+    }
 
     ui_dialog_loading_show("Application de la config radio...");
     /* Laisse 50ms a LVGL pour rendre le loading, puis on bloque dans system(). */
     lv_timer_t *t = lv_timer_create(deferred_apply_do, 50, NULL);
     lv_timer_set_repeat_count(t, 1);
+}
+
+static void apply_clicked(lv_event_t *e)
+{
+    (void)e;
+    char region[16];
+    lv_dropdown_get_selected_str(r_dd_region, region, sizeof(region));
+    float freq = 0.0f;
+    const char *ftxt = lv_textarea_get_text(r_ta_freq);
+    if (ftxt && ftxt[0]) freq = strtof(ftxt, NULL);
+    const char *ctxt = lv_textarea_get_text(r_ta_chans);
+    bool has_chans = (ctxt && ctxt[0]);
+
+    /* Concatene les avertissements eventuels (#1 remplacement canaux, #6 freq
+     * hors bande). S'il y en a, on demande confirmation avant d'appliquer ;
+     * sinon on applique directement. */
+    char warn[320] = "";
+    size_t off = 0;
+
+    float lo = 0, hi = 0;
+    if (freq_out_of_band(region, freq, &lo, &hi)) {
+        off += (size_t)snprintf(warn + off, sizeof(warn) - off,
+            "Frequence %.4f MHz hors bande %s (%.1f-%.1f MHz).\n\n",
+            freq, region, lo, hi);
+    }
+    if (has_chans) {
+        int n = mesh_channel_count();
+        off += (size_t)snprintf(warn + off, sizeof(warn) - off,
+            "Ce profil remplace tes %d canal(aux) actuel(s) par les canaux lies (--seturl efface l'ensemble).\n\n",
+            n);
+    }
+
+    if (off > 0) {
+        snprintf(warn + off, sizeof(warn) - off, "Appliquer quand meme ?");
+        ui_dialog_confirm(warn, do_apply);
+    } else {
+        do_apply();
+    }
 }
 
 /* Triche perceptuelle : le save reel est instantane (<1ms ecriture TSV).
