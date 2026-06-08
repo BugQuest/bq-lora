@@ -13,6 +13,7 @@
 static lv_obj_t *cm_ov, *cm_list;
 static lv_obj_t *cm_name_ov, *cm_name_ta;          /* sous-modal saisie nom */
 static lv_obj_t *cm_imp_ov, *cm_imp_ta;            /* sous-modal import URL */
+static lv_obj_t *cm_fr_ov;                          /* sous-modal canaux FR connus */
 static lv_obj_t *cm_share_ov;                       /* sous-modal QR partage */
 #if CFG_WIFI_QR
 static lv_obj_t *cm_qr_panel, *cm_qr_canvas, *cm_qr_status;
@@ -173,6 +174,99 @@ static void cm_import_e(lv_event_t *e) {
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     small_button(row, tr(STR_CANCEL),       CY_DIM,  cm_imp_cancel_e);
     small_button(row, tr(STR_CHAN_IMPORT) + 1, CY_CYAN, cm_imp_ok_e);
+}
+
+/* ---- canaux publics FR connus (import en un tap) ----
+ * URL = ChannelSet protobuf base64url ; l'import ne lit que les ChannelSettings
+ * (nom + PSK), il NE touche PAS au preset/region/freq radio (ceux-ci se reglent
+ * dans Reglages radio). PSK "AQ==" (0x01) = cle publique par defaut Meshtastic. */
+typedef struct {
+    const char *label;   /* nom affiche */
+    const char *desc;    /* courte description */
+    const char *url;     /* URL de partage meshtastic.org/e/# */
+} fr_chan_t;
+
+static const fr_chan_t FR_CHANS[] = {
+    {
+        "Gaulix (Fr_Balise / Fr_BlaBla / Fr_EMCOM)",
+        "Reseau national FR. Ajoute les 3 canaux publics. "
+        "Pense a regler la radio sur LONG_MODERATE + 869.4625 MHz.",
+        "https://meshtastic.org/e/#ChYSAQEaCUZyX0JhbGlzZSgBMAE6AgggChUSAQEaCEZy"
+        "X0VNQ09NKAEwAToCCCAKFhIBARoJRnJfQmxhQmxhKAEwAToCCCASFggBEAc4A0ADSAFQG2gBdZpdWUTIBgE",
+    },
+};
+#define FR_CHANS_N ((int)(sizeof(FR_CHANS) / sizeof(FR_CHANS[0])))
+
+static void cm_fr_close(void) {
+    if (cm_fr_ov) { lv_obj_delete(cm_fr_ov); cm_fr_ov = NULL; }
+}
+static void cm_fr_close_e(lv_event_t *e) { (void)e; cm_fr_close(); }
+
+static void cm_fr_import_e(lv_event_t *e) {
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i < 0 || i >= FR_CHANS_N) return;
+    const char *url = FR_CHANS[i].url;
+    cm_fr_close();
+    int n = mesh_channel_import_url(url);
+    if (n < 0)       ui_dialog_error(tr(STR_URL_INVALID));
+    else if (n == 0) ui_dialog_warning(tr(STR_NO_CHANNEL_ADDED));
+    else             ui_dialog_info(tr(STR_CHAN_ADDED));
+}
+
+static void cm_fr_open_e(lv_event_t *e) {
+    (void)e;
+    cm_fr_ov = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(cm_fr_ov, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(cm_fr_ov, lv_color_hex(CY_BG), 0);
+    lv_obj_set_style_bg_opa(cm_fr_ov, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(cm_fr_ov, 0, 0);
+    lv_obj_set_style_radius(cm_fr_ov, 0, 0);
+    lv_obj_set_style_pad_all(cm_fr_ov, 8, 0);
+    lv_obj_clear_flag(cm_fr_ov, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(cm_fr_ov, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(cm_fr_ov, 6, 0);
+
+    label(cm_fr_ov, "Canaux publics FR", FONT_BIG, CY_CYAN);
+
+    lv_obj_t *list = lv_obj_create(cm_fr_ov);
+    lv_obj_set_width(list, LV_PCT(100));
+    lv_obj_set_flex_grow(list, 1);
+    flat(list);
+    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(list, 6, 0);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+
+    for (int i = 0; i < FR_CHANS_N; i++) {
+        lv_obj_t *card = lv_obj_create(list);
+        lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
+        panel(card, CY_BORDER);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(card, 4, 0);
+
+        label(card, FR_CHANS[i].label, FONT_BODY, CY_CYAN);
+        lv_obj_t *d = label(card, FR_CHANS[i].desc, FONT_SMALL, CY_DIM);
+        lv_label_set_long_mode(d, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(d, LV_PCT(100));
+
+        lv_obj_t *act = lv_obj_create(card);
+        lv_obj_set_size(act, LV_PCT(100), 34);
+        flat(act); lv_obj_set_flex_flow(act, LV_FLEX_FLOW_ROW);
+        lv_obj_clear_flag(act, LV_OBJ_FLAG_SCROLLABLE);
+        char bi[40];
+        snprintf(bi, sizeof(bi), LV_SYMBOL_DOWNLOAD "%s", tr(STR_CHAN_IMPORT));
+        lv_obj_t *b = small_button(act, bi, CY_GREEN, NULL);
+        lv_obj_add_event_cb(b, cm_fr_import_e, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    }
+
+    lv_obj_t *bar = lv_obj_create(cm_fr_ov);
+    lv_obj_set_size(bar, LV_PCT(100), 38);
+    flat(bar); lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+    {
+        char fb[24]; snprintf(fb, sizeof(fb), LV_SYMBOL_CLOSE "  %s", tr(STR_CLOSE));
+        small_button(bar, fb, CY_DIM, cm_fr_close_e);
+    }
 }
 
 #if CFG_WIFI_QR
@@ -353,16 +447,26 @@ void ui_chanmgr_open_e(lv_event_t *e) {
     lv_obj_set_style_pad_column(r2, 6, 0);
     lv_obj_clear_flag(r2, LV_OBJ_FLAG_SCROLLABLE);
     {
-        char bi[32], bc[32];
+        char bi[32];
         snprintf(bi, sizeof(bi), LV_SYMBOL_DOWNLOAD "%s", tr(STR_CHAN_IMPORT));
-        snprintf(bc, sizeof(bc), LV_SYMBOL_CLOSE "%s",    tr(STR_CHAN_CLOSE));
         small_button(r2, bi, CY_AMBER, cm_import_e);
 #if CFG_WIFI_QR
         char bq[32];
         snprintf(bq, sizeof(bq), LV_SYMBOL_IMAGE "%s",    tr(STR_CHAN_QR_BTN));
         small_button(r2, bq, CY_GREEN, cm_qr_open_e);
 #endif
-        small_button(r2, bc, CY_DIM,   cm_close_e);
+        small_button(r2, LV_SYMBOL_GPS "  FR", CY_CYAN, cm_fr_open_e);
+    }
+
+    lv_obj_t *r3 = lv_obj_create(cm_ov);
+    lv_obj_set_size(r3, LV_PCT(100), 36);
+    flat(r3); lv_obj_set_flex_flow(r3, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(r3, 6, 0);
+    lv_obj_clear_flag(r3, LV_OBJ_FLAG_SCROLLABLE);
+    {
+        char bc[32];
+        snprintf(bc, sizeof(bc), LV_SYMBOL_CLOSE "%s", tr(STR_CHAN_CLOSE));
+        small_button(r3, bc, CY_DIM, cm_close_e);
     }
 }
 
