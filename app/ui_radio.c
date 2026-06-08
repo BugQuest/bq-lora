@@ -31,9 +31,18 @@ typedef struct {
     char  preset[20];
     int   hop;
     int   tx;
-    float freq;     /* override_frequency MHz, 0.0 = utilise la freq preset */
-    char  desc[80]; /* description courte (cas d'usage du preset) */
+    float freq;       /* override_frequency MHz, 0.0 = utilise la freq preset */
+    char  desc[80];   /* description courte (cas d'usage du preset) */
+    char  chans[300]; /* URL de partage des canaux lies (meshtastic.org/e/#...),
+                       * vide = ne touche pas aux canaux. Applique via --seturl
+                       * lors du Apply : changer de config radio change les canaux. */
 } radio_preset_t;
+
+/* Canaux du reseau Gaulix FR (Fr_Balise / Fr_BlaBla / Fr_EMCOM, PSK public).
+ * Lie au preset "Gaulix FR" : appliquer ce preset bascule aussi les canaux. */
+#define GAULIX_CHANS_URL \
+    "https://meshtastic.org/e/#ChYSAQEaCUZyX0JhbGlzZSgBMAE6AgggChUSAQEaCEZy" \
+    "X0VNQ09NKAEwAToCCCAKFhIBARoJRnJfQmxhQmxhKAEwAToCCCASFggBEAc4A0ADSAFQG2gBdZpdWUTIBgE"
 
 static radio_preset_t s_presets[MAX_PRESETS];
 static int            s_preset_count;
@@ -42,15 +51,16 @@ static int            s_preset_count;
  * Sert de starter kit : l'utilisateur peut les charger, modifier, supprimer. */
 static const radio_preset_t kDefaultPresets[] = {
     { "Gaulix FR",        "EU_868", "LONG_MODERATE", 3, 27, 869.4625f,
-      "Reseau Gaulix France : portee+, freq 869.4625 separee du LongFast public" },
+      "Reseau Gaulix France : portee+, freq 869.4625 separee du LongFast public",
+      GAULIX_CHANS_URL },
     { "LongFast public",  "EU_868", "LONG_FAST",     3, 27,   0.0f,
-      "Defaut mondial Meshtastic : equilibre debit/portee, 869.525 MHz" },
+      "Defaut mondial Meshtastic : equilibre debit/portee, 869.525 MHz", "" },
     { "MediumFast",       "EU_868", "MEDIUM_FAST",   3, 27,   0.0f,
-      "Plus de debit, portee reduite (~2x latence/2)" },
+      "Plus de debit, portee reduite (~2x latence/2)", "" },
     { "ShortFast indoor", "EU_868", "SHORT_FAST",    1, 10,   0.0f,
-      "Tests rapproches en interieur, TX faible 10 dBm, hop=1" },
+      "Tests rapproches en interieur, TX faible 10 dBm, hop=1", "" },
     { "LongSlow DX",      "EU_868", "LONG_SLOW",     5, 27,   0.0f,
-      "Portee maximale : LoRa SF12, debit minimal, lointain/relais" },
+      "Portee maximale : LoRa SF12, debit minimal, lointain/relais", "" },
 };
 #define DEFAULT_PRESET_COUNT (int)(sizeof(kDefaultPresets) / sizeof(kDefaultPresets[0]))
 
@@ -62,6 +72,7 @@ static lv_obj_t *r_sl_tx,  *r_sl_tx_lbl;
 static lv_obj_t *r_ta_name;
 static lv_obj_t *r_ta_freq;
 static lv_obj_t *r_ta_desc;
+static lv_obj_t *r_ta_chans;
 static lv_obj_t *r_dd_load;
 static lv_obj_t *r_desc_lbl;
 static lv_obj_t *r_status;
@@ -81,22 +92,66 @@ static void presets_install_defaults(void)
     presets_save();
 }
 
+/* Decoupe une chaine sur les tabulations (gere les champs vides, contrairement
+ * a sscanf %[^\t] qui echoue sur un champ vide et stoppe le parsing). Renvoie le
+ * champ courant et avance *p apres la tabulation, ou NULL quand epuise. */
+static char *next_tab(char **p)
+{
+    char *s = *p;
+    if (!s) return NULL;
+    char *t = strchr(s, '\t');
+    if (t) { *t = '\0'; *p = t + 1; }
+    else   { *p = NULL; }
+    return s;
+}
+
 static void presets_load(void)
 {
     s_preset_count = 0;
     FILE *f = fopen(RADIO_PRESETS_PATH, "r");
     if (!f) { presets_install_defaults(); return; }
-    char line[256];
+    char line[512];
     while (s_preset_count < MAX_PRESETS && fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = '\0';
+        if (!line[0]) continue;
+        /* Format : nom region preset hop tx [freq] [desc] [chans-url]
+         * Compat ascendante : colonnes absentes -> 0 / "". */
+        char *cur = line;
+        const char *name   = next_tab(&cur);
+        const char *region = next_tab(&cur);
+        const char *preset = next_tab(&cur);
+        const char *hop    = next_tab(&cur);
+        const char *tx     = next_tab(&cur);
+        const char *freq   = next_tab(&cur);
+        const char *desc   = next_tab(&cur);
+        const char *chans  = next_tab(&cur);
+        if (!name || !region || !preset || !hop || !tx) continue;
+
         radio_preset_t p;
         memset(&p, 0, sizeof(p));
-        /* Format etendu : nom region preset hop tx [freq] [desc]
-         * Compat 5/6 colonnes : freq/desc partent a 0/"" si absents. */
-        int got = sscanf(line, "%23[^\t]\t%15[^\t]\t%19[^\t]\t%d\t%d\t%f\t%79[^\t\n]",
-                         p.name, p.region, p.preset, &p.hop, &p.tx, &p.freq, p.desc);
-        if (got >= 5) s_presets[s_preset_count++] = p;
+        snprintf(p.name,   sizeof(p.name),   "%s", name);
+        snprintf(p.region, sizeof(p.region), "%s", region);
+        snprintf(p.preset, sizeof(p.preset), "%s", preset);
+        p.hop  = atoi(hop);
+        p.tx   = atoi(tx);
+        p.freq = freq ? strtof(freq, NULL) : 0.0f;
+        if (desc)  snprintf(p.desc,  sizeof(p.desc),  "%s", desc);
+        if (chans) snprintf(p.chans, sizeof(p.chans), "%s", chans);
+        s_presets[s_preset_count++] = p;
     }
     fclose(f);
+
+    /* Migration : un fichier au format < 8 colonnes n'a pas de canaux lies.
+     * On backfill le preset "Gaulix FR" avec ses canaux et on persiste, pour
+     * que la liaison config<->canaux marche sur les installs existantes. */
+    bool migrated = false;
+    for (int i = 0; i < s_preset_count; i++) {
+        if (!s_presets[i].chans[0] && strcmp(s_presets[i].name, "Gaulix FR") == 0) {
+            snprintf(s_presets[i].chans, sizeof(s_presets[i].chans), "%s", GAULIX_CHANS_URL);
+            migrated = true;
+        }
+    }
+    if (migrated) presets_save();
 }
 
 static void presets_save(void)
@@ -106,8 +161,8 @@ static void presets_save(void)
     if (!f) return;
     for (int i = 0; i < s_preset_count; i++) {
         const radio_preset_t *p = &s_presets[i];
-        fprintf(f, "%s\t%s\t%s\t%d\t%d\t%.4f\t%s\n",
-                p->name, p->region, p->preset, p->hop, p->tx, p->freq, p->desc);
+        fprintf(f, "%s\t%s\t%s\t%d\t%d\t%.4f\t%s\t%s\n",
+                p->name, p->region, p->preset, p->hop, p->tx, p->freq, p->desc, p->chans);
     }
     fclose(f);
     rename(tmp, RADIO_PRESETS_PATH);
@@ -153,7 +208,7 @@ static void dd_options_presets(lv_obj_t *dd)
 
 /* ------------------------------------------------------------ apply / save */
 
-static char s_deferred_apply_cmd[640];
+static char s_deferred_apply_cmd[1024];
 
 static void deferred_apply_do(lv_timer_t *t)
 {
@@ -163,7 +218,7 @@ static void deferred_apply_do(lv_timer_t *t)
     if (rc == 0) {
         status_set("Applique. Re-sync...", CY_GREEN);
         mesh_refresh_config();
-        ui_dialog_info("Configuration appliquee. La radio se reconfigure.");
+        ui_dialog_info("Configuration radio + canaux appliquee.\nLa radio se reconfigure.");
     } else {
         status_set("Echec apply", CY_MAGENTA);
         ui_dialog_error("Echec de l'application. Voir /tmp/radio_apply.log");
@@ -182,11 +237,21 @@ static void apply_clicked(lv_event_t *e)
     const char *ftxt = lv_textarea_get_text(r_ta_freq);
     if (ftxt && ftxt[0]) freq = strtof(ftxt, NULL);
 
+    /* Canaux lies : si une URL de canaux est presente, on l'applique via
+     * --seturl DANS LA MEME invocation -> changer de config radio bascule
+     * aussi les canaux. --seturl remplace l'ensemble des canaux ; les --set
+     * lora.* qui suivent forcent region/hop/tx/freq selon le formulaire. */
+    char seturl[420] = "";
+    const char *ctxt = lv_textarea_get_text(r_ta_chans);
+    if (ctxt && ctxt[0])
+        snprintf(seturl, sizeof(seturl), "--seturl '%s' ", ctxt);
+
     /* On stash la commande pour qu'un timer one-shot l'execute apres
      * que lvgl ait eu le temps de rendre le loading. system() bloque
      * 1-3s, on ne peut pas le faire inline ou le spinner n'apparait jamais. */
     snprintf(s_deferred_apply_cmd, sizeof(s_deferred_apply_cmd),
              "%s --host 127.0.0.1 "
+             "%s"
              "--set lora.region %s "
              "--set lora.modem_preset %s "
              "--set lora.use_preset true "
@@ -194,7 +259,7 @@ static void apply_clicked(lv_event_t *e)
              "--set lora.tx_power %d "
              "--set lora.override_frequency %.4f "
              ">/tmp/radio_apply.log 2>&1",
-             MESHTASTIC_CLI, region, preset, hop, tx, freq);
+             MESHTASTIC_CLI, seturl, region, preset, hop, tx, freq);
 
     ui_dialog_loading_show("Application de la config radio...");
     /* Laisse 50ms a LVGL pour rendre le loading, puis on bloque dans system(). */
@@ -262,6 +327,8 @@ static void save_clicked(lv_event_t *e)
         p.freq = (ftxt && ftxt[0]) ? strtof(ftxt, NULL) : 0.0f;
         const char *dtxt = lv_textarea_get_text(r_ta_desc);
         if (dtxt) snprintf(p.desc, sizeof(p.desc), "%s", dtxt);
+        const char *ctxt = lv_textarea_get_text(r_ta_chans);
+        if (ctxt) snprintf(p.chans, sizeof(p.chans), "%s", ctxt);
     }
     s_deferred_save = p;
     lv_timer_t *t = lv_timer_create(deferred_save_do, 220, NULL);
@@ -286,6 +353,7 @@ static void deferred_load_do(lv_timer_t *t)
     if (p->freq > 0.0001f) { snprintf(b, sizeof(b), "%.4f", p->freq); lv_textarea_set_text(r_ta_freq, b); }
     else                   { lv_textarea_set_text(r_ta_freq, ""); }
     if (r_ta_desc)  lv_textarea_set_text(r_ta_desc, p->desc);
+    if (r_ta_chans) lv_textarea_set_text(r_ta_chans, p->chans);
     if (r_desc_lbl) lv_label_set_text(r_desc_lbl, p->desc[0] ? p->desc : " ");
     ui_dialog_loading_hide();
     status_set("Preset charge (non applique)", CY_CYAN);
@@ -529,6 +597,10 @@ void ui_radio_open_e(lv_event_t *e)
     lv_obj_add_event_cb(r_ta_desc, set_ta_focus_e, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(r_ta_desc, set_ta_focus_e, LV_EVENT_FOCUSED, NULL);
 
+    /* Canaux lies (URL de partage). Pre-rempli quand on charge un preset ;
+     * applique avec la config radio (--seturl) au Apply. Vide = canaux inchanges. */
+    r_ta_chans = settings_field(r_ov, "Canaux lies (URL, optionnel)", "", false);
+
     row = form_row(r_ov, "Charger");
     r_dd_load = lv_dropdown_create(row);
     style_dropdown(r_dd_load);
@@ -542,9 +614,10 @@ void ui_radio_open_e(lv_event_t *e)
 
     /* Scroll-into-view sur chaque textarea : evite que la TA reste cachee
      * sous le clavier lorsqu'elle prend le focus. */
-    lv_obj_add_event_cb(r_ta_name, radio_ta_focus_scroll, LV_EVENT_FOCUSED, NULL);
-    lv_obj_add_event_cb(r_ta_desc, radio_ta_focus_scroll, LV_EVENT_FOCUSED, NULL);
-    lv_obj_add_event_cb(r_ta_freq, radio_ta_focus_scroll, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(r_ta_name,  radio_ta_focus_scroll, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(r_ta_desc,  radio_ta_focus_scroll, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(r_ta_freq,  radio_ta_focus_scroll, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(r_ta_chans, radio_ta_focus_scroll, LV_EVENT_FOCUSED, NULL);
 
     /* Boutons d'action */
     lv_obj_t *bar = lv_obj_create(r_ov);
