@@ -47,11 +47,17 @@ static lv_obj_t *overlay_new(void)
     return s_overlay;
 }
 
-/* Carte centrale avec bordure de la couleur passee. */
+/* Carte centrale avec bordure de la couleur passee.
+ * Note : LV_FLEX_ALIGN_CENTER sur l'axe principal + LV_SIZE_CONTENT pour la
+ * hauteur sont incompatibles (lvgl ne peut pas centrer dans un conteneur qui
+ * s'adapte au contenu) et provoquent une cascade vers la taille de l'overlay
+ * plein ecran. On utilise START sur l'axe principal et on cap la hauteur. */
 static lv_obj_t *card_new(uint32_t border_color)
 {
     lv_obj_t *card = lv_obj_create(s_overlay);
-    lv_obj_set_size(card, LV_PCT(85), LV_SIZE_CONTENT);
+    lv_obj_set_width(card, LV_PCT(85));
+    lv_obj_set_height(card, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_height(card, LV_PCT(80), 0);
     lv_obj_center(card);
     lv_obj_set_style_bg_color(card, lv_color_hex(CY_PANEL), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
@@ -61,7 +67,9 @@ static lv_obj_t *card_new(uint32_t border_color)
     lv_obj_set_style_pad_all(card, 14, 0);
     lv_obj_set_style_pad_row(card, 10, 0);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_CENTER,
+    /* START sur axe principal (vertical) : empile depuis le haut, hauteur
+     * = sum(children). CENTER sur axe cross (horizontal) : centre les enfants. */
+    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     return card;
@@ -100,9 +108,11 @@ void ui_dialog_loading_show(const char *msg)
     lv_obj_set_style_arc_width(sp, 4, LV_PART_INDICATOR);
     message_add(card, msg ? msg : "Chargement...");
     s_loading = card;
-    /* lvgl flush pour que le spinner soit visible avant que le caller
-     * n'enchaine une operation bloquante (ex system() de meshtastic CLI). */
-    lv_refr_now(NULL);
+    /* PAS de lv_refr_now() ici : appele depuis un event handler, ca re-entre
+     * dans la pipeline de rendu LVGL et provoque un leak progressif (VIRT
+     * monte de 12 MB a 80+ MB en quelques minutes, CPU finit a 100% -> freeze).
+     * Pour les ops longues blocantes, defere via lv_timer (one-shot) au lieu
+     * de forcer le rendu inline. */
 }
 
 void ui_dialog_loading_hide(void)
@@ -114,6 +124,23 @@ void ui_dialog_loading_hide(void)
 
 /* ------------------------------------------------------------ Info / Warning / Error */
 
+/* Row horizontale pour boutons : small_button utilise flex_grow=1 qui suppose
+ * un parent flex ROW. Dans la card (flex COLUMN) ca le faisait grandir
+ * verticalement avec largeur naturelle -> texte vertical. */
+static lv_obj_t *button_row(lv_obj_t *card)
+{
+    lv_obj_t *row = lv_obj_create(card);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(row);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 10, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    return row;
+}
+
 static void single_button_dialog(const char *icon, const char *title,
                                  uint32_t color, const char *msg)
 {
@@ -121,7 +148,8 @@ static void single_button_dialog(const char *icon, const char *title,
     lv_obj_t *card = card_new(color);
     title_add(card, icon, title, color);
     message_add(card, msg);
-    small_button(card, "OK", color, btn_close_e);
+    lv_obj_t *row = button_row(card);
+    small_button(row, "OK", color, btn_close_e);
 }
 
 void ui_dialog_info(const char *msg)
@@ -151,14 +179,7 @@ void ui_dialog_confirm(const char *msg, void (*on_yes)(void))
     title_add(card, LV_SYMBOL_WARNING, "Confirmer", CY_AMBER);
     message_add(card, msg);
 
-    lv_obj_t *bar = lv_obj_create(card);
-    lv_obj_set_size(bar, LV_PCT(100), LV_SIZE_CONTENT);
-    flat(bar);
-    lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_SPACE_EVENLY,
-                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(bar, 12, 0);
-    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *bar = button_row(card);
     small_button(bar, LV_SYMBOL_OK    " Oui", CY_GREEN,   btn_yes_e);
     small_button(bar, LV_SYMBOL_CLOSE " Non", CY_MAGENTA, btn_close_e);
 }

@@ -153,6 +153,23 @@ static void dd_options_presets(lv_obj_t *dd)
 
 /* ------------------------------------------------------------ apply / save */
 
+static char s_deferred_apply_cmd[640];
+
+static void deferred_apply_do(lv_timer_t *t)
+{
+    lv_timer_delete(t);
+    int rc = system(s_deferred_apply_cmd);
+    ui_dialog_loading_hide();
+    if (rc == 0) {
+        status_set("Applique. Re-sync...", CY_GREEN);
+        mesh_refresh_config();
+        ui_dialog_info("Configuration appliquee. La radio se reconfigure.");
+    } else {
+        status_set("Echec apply", CY_MAGENTA);
+        ui_dialog_error("Echec de l'application. Voir /tmp/radio_apply.log");
+    }
+}
+
 static void apply_clicked(lv_event_t *e)
 {
     (void)e;
@@ -165,10 +182,10 @@ static void apply_clicked(lv_event_t *e)
     const char *ftxt = lv_textarea_get_text(r_ta_freq);
     if (ftxt && ftxt[0]) freq = strtof(ftxt, NULL);
 
-    /* Une seule commande qui groupe tous les --set : la radio reboot une fois.
-     * override_frequency : 0 = utilise la freq par defaut du preset/region. */
-    char cmd[640];
-    snprintf(cmd, sizeof(cmd),
+    /* On stash la commande pour qu'un timer one-shot l'execute apres
+     * que lvgl ait eu le temps de rendre le loading. system() bloque
+     * 1-3s, on ne peut pas le faire inline ou le spinner n'apparait jamais. */
+    snprintf(s_deferred_apply_cmd, sizeof(s_deferred_apply_cmd),
              "%s --host 127.0.0.1 "
              "--set lora.region %s "
              "--set lora.modem_preset %s "
@@ -178,18 +195,47 @@ static void apply_clicked(lv_event_t *e)
              "--set lora.override_frequency %.4f "
              ">/tmp/radio_apply.log 2>&1",
              MESHTASTIC_CLI, region, preset, hop, tx, freq);
-    /* Loading visible pendant que la CLI meshtastic pousse la conf et que la
-     * radio reboot. Operation potentiellement bloquante (~1-3s). */
+
     ui_dialog_loading_show("Application de la config radio...");
-    int rc = system(cmd);
+    /* Laisse 50ms a LVGL pour rendre le loading, puis on bloque dans system(). */
+    lv_timer_t *t = lv_timer_create(deferred_apply_do, 50, NULL);
+    lv_timer_set_repeat_count(t, 1);
+}
+
+/* Triche perceptuelle : le save reel est instantane (<1ms ecriture TSV).
+ * On force un delai de 220ms pour que le spinner soit reellement vu.
+ * Etudes UX : une operation < 100ms parait "rate" sans feedback ; un loading
+ * 200ms parait "fiable". On stash la donnee en static, le timer one-shot fait
+ * le travail puis le info. */
+static radio_preset_t s_deferred_save;
+static int            s_deferred_load_idx = -1;
+
+static void deferred_save_do(lv_timer_t *t)
+{
+    radio_preset_t p = s_deferred_save;
+    lv_timer_delete(t);
+
+    /* upsert par nom */
+    int idx = -1;
+    for (int i = 0; i < s_preset_count; i++)
+        if (strcmp(s_presets[i].name, p.name) == 0) { idx = i; break; }
+    if (idx < 0) {
+        if (s_preset_count >= MAX_PRESETS) {
+            ui_dialog_loading_hide();
+            status_set("Limite atteinte", CY_AMBER);
+            ui_dialog_error("Nombre maximum de presets atteint (16).");
+            return;
+        }
+        idx = s_preset_count++;
+    }
+    s_presets[idx] = p;
+    presets_save();
+    dd_options_presets(r_dd_load);
     ui_dialog_loading_hide();
-    if (rc == 0) {
-        status_set("Applique. Re-sync...", CY_GREEN);
-        mesh_refresh_config();
-        ui_dialog_info("Configuration appliquee. La radio se reconfigure.");
-    } else {
-        status_set("Echec apply", CY_MAGENTA);
-        ui_dialog_error("Echec de l'application. Voir /tmp/radio_apply.log");
+    status_set("Preset sauvegarde", CY_GREEN);
+    {
+        char m[96]; snprintf(m, sizeof(m), "Preset \"%s\" sauvegarde.", p.name);
+        ui_dialog_info(m);
     }
 }
 
@@ -217,39 +263,17 @@ static void save_clicked(lv_event_t *e)
         const char *dtxt = lv_textarea_get_text(r_ta_desc);
         if (dtxt) snprintf(p.desc, sizeof(p.desc), "%s", dtxt);
     }
-
-    /* upsert par nom */
-    int idx = -1;
-    for (int i = 0; i < s_preset_count; i++)
-        if (strcmp(s_presets[i].name, p.name) == 0) { idx = i; break; }
-    if (idx < 0) {
-        if (s_preset_count >= MAX_PRESETS) {
-            ui_dialog_loading_hide();
-            status_set("Limite atteinte", CY_AMBER);
-            ui_dialog_error("Nombre maximum de presets atteint (16).");
-            return;
-        }
-        idx = s_preset_count++;
-    }
-    s_presets[idx] = p;
-    presets_save();
-    dd_options_presets(r_dd_load);
-    ui_dialog_loading_hide();
-    status_set("Preset sauvegarde", CY_GREEN);
-    {
-        char m[96]; snprintf(m, sizeof(m), "Preset \"%s\" sauvegarde.", p.name);
-        ui_dialog_info(m);
-    }
+    s_deferred_save = p;
+    lv_timer_t *t = lv_timer_create(deferred_save_do, 220, NULL);
+    lv_timer_set_repeat_count(t, 1);
 }
 
-static void load_changed(lv_event_t *e)
+static void deferred_load_do(lv_timer_t *t)
 {
-    (void)e;
-    int sel = (int)lv_dropdown_get_selected(r_dd_load);
-    if (sel <= 0) return;                     /* 0 = placeholder */
-    int idx = sel - 1;
-    if (idx < 0 || idx >= s_preset_count) return;
-    ui_dialog_loading_show("Chargement du preset...");
+    int idx = s_deferred_load_idx;
+    s_deferred_load_idx = -1;
+    lv_timer_delete(t);
+    if (idx < 0 || idx >= s_preset_count) { ui_dialog_loading_hide(); return; }
     const radio_preset_t *p = &s_presets[idx];
     lv_dropdown_set_selected(r_dd_region, str_index(kRegions, p->region));
     lv_dropdown_set_selected(r_dd_preset, str_index(kPresets, p->preset));
@@ -270,6 +294,19 @@ static void load_changed(lv_event_t *e)
         snprintf(m, sizeof(m), "Preset \"%s\" charge.\nTape Apply pour activer.", p->name);
         ui_dialog_info(m);
     }
+}
+
+static void load_changed(lv_event_t *e)
+{
+    (void)e;
+    int sel = (int)lv_dropdown_get_selected(r_dd_load);
+    if (sel <= 0) return;                     /* 0 = placeholder */
+    int idx = sel - 1;
+    if (idx < 0 || idx >= s_preset_count) return;
+    ui_dialog_loading_show("Chargement du preset...");
+    s_deferred_load_idx = idx;
+    lv_timer_t *t = lv_timer_create(deferred_load_do, 220, NULL);
+    lv_timer_set_repeat_count(t, 1);
 }
 
 static void do_delete(void)

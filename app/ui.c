@@ -37,6 +37,7 @@ int       cur_tab  = APP_HOME;     /* defini ici, declare extern dans ui_common.
 /* cur_tab definition deplacee au-dessus avant le re-include de ui_common.h */
 
 void show_tab(int app);            /* non-static : utilise depuis ui_camera.c */
+static void show_tab_now(int app); /* impl reelle (rebuild content) */
 /* Les helpers UI partages (kb, flat, panel, label, small_button, confirm_dialog)
  * sont declares dans ui_common.h pour etre utilises par les modules separes
  * (ui_audio.c, etc.) -- pas besoin de forward decls locales ici. */
@@ -451,6 +452,11 @@ lv_obj_t *small_button(lv_obj_t *parent, const char *txt, uint32_t color, lv_eve
     lv_obj_set_style_border_width(b, 1, 0);
     lv_obj_set_style_border_color(b, lv_color_hex(color), 0);
     lv_obj_set_style_shadow_width(b, 0, 0);
+    /* feedback tactile statique : opacite plus marquee + bordure plus claire
+     * sur press. PAS de transition (vu sur Pi Zero 2 W : la combinaison
+     * transition + nombreuses instances envoie le rendu en boucle ~90% CPU,
+     * sature le SPI et tue le tactile XPT2046). */
+    lv_obj_set_style_bg_opa(b, LV_OPA_70, LV_STATE_PRESSED);
     if (cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l = label(b, txt, FONT_SMALL, CY_TEXT);
     lv_obj_center(l);
@@ -1088,7 +1094,9 @@ static void build_home(void);
 /* build_camera + build_gallery : extraits dans ui_camera.c
  * (ui_camera_build, ui_gallery_build). Les statics cam_* et gal_* y vivent. */
 
-void show_tab(int app) {
+void show_tab(int app) { show_tab_now(app); }
+
+static void show_tab_now(int app) {
     if (sys_refresh_timer) { lv_timer_delete(sys_refresh_timer); sys_refresh_timer = NULL; }
     /* arrete le flux camera live et oublie ses widgets avant de nettoyer content */
     ui_camera_stream_stop();

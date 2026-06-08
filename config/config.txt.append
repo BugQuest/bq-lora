@@ -8,6 +8,8 @@ dtparam=spi=on
 
 # Afficheur ILI9488 piloté via le driver fbtft ili9486 (compatible, validé).
 # Rétroéclairage GPIO18 piloté séparément en PWM matériel (cf. backlight.service).
+# SPI 24 MHz : a 32 MHz le tactile XPT2046 (meme bus SPI0) recoit du bruit
+# et plus aucun event ne remonte. Restera a 24 jusqu'a investigation propre.
 dtoverlay=fbtft,spi0-0,ili9486,reset_pin=25,dc_pin=24,rotate=180,speed=24000000,bgr=1,fps=30
 
 # PWM matériel sur GPIO18 (channel 0) pour la luminosité du rétroéclairage
