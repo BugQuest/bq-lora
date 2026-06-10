@@ -15,6 +15,8 @@
 
 #define GPS_DEV   "/dev/serial0"
 #define LINE_MAX  120
+#define LK_PATH   "/home/bq-lora/bq-lora-ui/gps_last.txt"
+#define LK_SAVE_S 30          /* ecriture disque au plus toutes les 30 s (usure SD) */
 
 static int          s_fd = -1;
 static char         s_line[LINE_MAX];
@@ -22,6 +24,32 @@ static int          s_len;
 static gps_state_t  s_st;
 static time_t       s_open_retry;     /* prochaine tentative d'ouverture */
 static bool         s_enabled = true; /* lecteur GPS actif ? */
+
+/* derniere position connue (point constant sur la carte) */
+static double       s_lk_lat, s_lk_lon;
+static uint32_t     s_lk_epoch;       /* 0 = aucune position connue */
+static time_t       s_lk_saved;       /* derniere ecriture disque */
+
+static void lk_load(void)
+{
+    FILE *f = fopen(LK_PATH, "r");
+    if (!f) return;
+    double la, lo; long ep = 0;
+    if (fscanf(f, "%lf %lf %ld", &la, &lo, &ep) == 3 && ep > 0) {
+        s_lk_lat = la; s_lk_lon = lo; s_lk_epoch = (uint32_t)ep;
+    }
+    fclose(f);
+}
+
+static void lk_save(void)
+{
+    if (!s_lk_epoch) return;
+    FILE *f = fopen(LK_PATH, "w");
+    if (!f) return;
+    fprintf(f, "%.7f %.7f %u\n", s_lk_lat, s_lk_lon, s_lk_epoch);
+    fclose(f);
+    s_lk_saved = time(NULL);
+}
 
 /* Accumulation GSV (les satellites en vue arrivent sur plusieurs trames). */
 static gps_sat_t    s_gsv[GPS_MAX_SATS];
@@ -51,6 +79,7 @@ void gps_init(void)
 {
     memset(&s_st, 0, sizeof(s_st));
     s_len = 0;
+    lk_load();                 /* recharge la derniere position connue */
     if (s_enabled) gps_open();
 }
 
@@ -224,6 +253,13 @@ void gps_poll(void)
     }
     if (any) s_st.last_rx = (uint32_t)time(NULL);
 
+    /* memorise la derniere position connue (point constant carte) */
+    if (s_st.valid) {
+        s_lk_lat = s_st.lat; s_lk_lon = s_st.lon;
+        s_lk_epoch = (uint32_t)time(NULL);
+        if (time(NULL) - s_lk_saved >= LK_SAVE_S) lk_save();
+    }
+
     /* perte de fix : si plus de trame valide depuis >5 s, on invalide. */
     if (s_st.valid && time(NULL) - (time_t)s_st.last_fix > 5) s_st.valid = false;
 }
@@ -241,7 +277,9 @@ void gps_set_enabled(bool en)
     if (en == s_enabled) return;
     s_enabled = en;
     if (!en) {
-        /* coupe le port et oublie l'etat (les apps voient "GPS off") */
+        /* coupe le port et oublie l'etat (les apps voient "GPS off").
+         * On persiste d'abord la derniere position connue (point constant). */
+        lk_save();
         if (s_fd >= 0) { close(s_fd); s_fd = -1; }
         s_len = 0;
         s_gsv_n = 0; s_gsv_total_msg = 0;
@@ -253,3 +291,12 @@ void gps_set_enabled(bool en)
 }
 
 bool gps_enabled(void) { return s_enabled; }
+
+bool gps_last_known(double *lat, double *lon, uint32_t *epoch)
+{
+    if (!s_lk_epoch) return false;
+    if (lat)   *lat   = s_lk_lat;
+    if (lon)   *lon   = s_lk_lon;
+    if (epoch) *epoch = s_lk_epoch;
+    return true;
+}

@@ -40,12 +40,14 @@ static double   s_clat = 45.764, s_clon = 4.835;   /* centre (defaut : Lyon) */
 static int      s_zoom = 15;
 static bool     s_follow = true;
 static bool     s_show_nodes = true;
+static bool     s_center_init = false;  /* a-t-on deja centre sur la derniere pos ? */
 
 /* --- widgets --- */
 static lv_obj_t *s_map;                 /* conteneur viewport (recoit le touch) */
 static lv_obj_t *s_pool[POOL_N];        /* images tuiles */
 static uint64_t  s_pool_key[POOL_N];    /* cle z/x/y actuellement affichee */
-static lv_obj_t *s_gps_mark;            /* marqueur position */
+static lv_obj_t *s_gps_mark;            /* marqueur position live (fix actuel) */
+static lv_obj_t *s_lk_mark;             /* marqueur derniere position connue */
 static lv_obj_t *s_nm[NODE_MARK_N];     /* marqueurs noeuds */
 static lv_obj_t *s_info_lbl;            /* zoom / etat */
 
@@ -215,10 +217,18 @@ static void map_render(void)
     }
     for (; p < POOL_N; p++) { lv_obj_add_flag(s_pool[p], LV_OBJ_FLAG_HIDDEN); s_pool_key[p] = 0; }
 
-    /* marqueur GPS */
+    /* marqueur GPS live (fix actuel) */
     const gps_state_t *g = gps_state();
     if (g->valid) place_marker(s_gps_mark, g->lat, g->lon, cx, cy, W, H);
     else lv_obj_add_flag(s_gps_mark, LV_OBJ_FLAG_HIDDEN);
+
+    /* marqueur derniere position connue (point constant : visible des qu'il n'y
+     * a pas de fix live, y compris GPS coupe) */
+    double lk_lat, lk_lon;
+    if (!g->valid && gps_last_known(&lk_lat, &lk_lon, NULL))
+        place_marker(s_lk_mark, lk_lat, lk_lon, cx, cy, W, H);
+    else
+        lv_obj_add_flag(s_lk_mark, LV_OBJ_FLAG_HIDDEN);
 
     /* calque noeuds */
     int used = 0;
@@ -289,7 +299,9 @@ static void follow_cb(lv_event_t *e)
     (void)e;
     const gps_state_t *g = gps_state();
     s_follow = true;
+    double la, lo;
     if (g->valid) { s_clat = g->lat; s_clon = g->lon; }
+    else if (gps_last_known(&la, &lo, NULL)) { s_clat = la; s_clon = lo; }
     map_render();
 }
 static void nodes_cb(lv_event_t *e) { (void)e; s_show_nodes = !s_show_nodes; map_render(); }
@@ -340,7 +352,7 @@ void ui_map_reset(void)
     if (s_tc) { free(s_tc); s_tc = NULL; }
     s_lru = 0;
 
-    s_map = NULL; s_gps_mark = NULL; s_info_lbl = NULL;
+    s_map = NULL; s_gps_mark = NULL; s_lk_mark = NULL; s_info_lbl = NULL;
     s_drag = false;
     s_vw = s_vh = 0;
     s_rendered = false; s_last_zoom = -1;
@@ -355,6 +367,14 @@ void ui_map_build(void)
     /* garde-fou : le dossier de tuiles existe-t-il ? */
     struct stat st;
     s_have_maps = (stat(MAP_DIR, &st) == 0 && S_ISDIR(st.st_mode));
+
+    /* au tout premier affichage, centre sur la derniere position connue si on
+     * en a une (sinon on garde le defaut Lyon) */
+    if (!s_center_init) {
+        double la, lo;
+        if (gps_last_known(&la, &lo, NULL)) { s_clat = la; s_clon = lo; }
+        s_center_init = true;
+    }
 
     /* cache de tuiles alloue maintenant, libere dans ui_map_reset() */
     s_tc = calloc(TCACHE_N, sizeof(tcache_t));   /* ~2 Mo ; NULL toleré (tile_get garde) */
@@ -405,6 +425,17 @@ void ui_map_build(void)
     lv_obj_set_style_shadow_width(gm, 0, 0);
     lv_obj_add_flag(gm, LV_OBJ_FLAG_HIDDEN);
     s_gps_mark = gm;
+
+    /* marqueur derniere position connue : anneau creux (distinct du point live) */
+    lv_obj_t *lk = lv_obj_create(map);
+    lv_obj_set_size(lk, 14, 14);
+    lv_obj_set_style_radius(lk, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(lk, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_color(lk, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(lk, 2, 0);
+    lv_obj_set_style_shadow_width(lk, 0, 0);
+    lv_obj_add_flag(lk, LV_OBJ_FLAG_HIDDEN);
+    s_lk_mark = lk;
 
     /* controles flottants */
     map_btn(LV_SYMBOL_PLUS,  LV_ALIGN_TOP_RIGHT,    -4, 4,  zoom_in_cb);

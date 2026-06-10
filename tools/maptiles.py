@@ -24,9 +24,9 @@ JOBS = [
 
 # tile.openstreetmap.org INTERDIT le bulk-download : il renvoie une image
 # "access blocked" (HTTP 200) qui empoisonne le cache. On utilise les basemaps
-# CARTO (fond clair "light_all"), qui tolerent un usage perso modere et servent
-# de vraies tuiles (delai raisonnable + UA honnete).
-TILE_URL = "https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+# CARTO (fond sombre "dark_all" : bien plus lisible sur le petit ecran que le
+# clair), qui tolerent un usage perso modere et servent de vraies tuiles.
+TILE_URL = "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
 UA = "bq-lora-ui/1.0 (offline cyberdeck map cache; personal use; realitynauts@gmail.com)"
 
 # md5 hex de tuiles connues comme "image de blocage / erreur" a rejeter.

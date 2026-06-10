@@ -56,3 +56,9 @@ bool              gps_connected(void);   /* present && octets recents */
  * "GPS off". Reactiver rouvre le port au prochain gps_poll(). */
 void              gps_set_enabled(bool en);
 bool              gps_enabled(void);
+
+/* Derniere position connue (mise a jour a chaque fix valide, persistee sur
+ * disque -> survit au reboot et au GPS coupe). Donne un point de reference
+ * constant sur la carte meme sans fix. Renvoie false si aucune position connue.
+ * lat/lon/epoch peuvent etre NULL. */
+bool              gps_last_known(double *lat, double *lon, uint32_t *epoch);
