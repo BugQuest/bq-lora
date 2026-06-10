@@ -4,6 +4,7 @@
 #include "calib.h"
 #include "settings.h"
 #include "mesh.h"
+#include "gps.h"
 #include "sys.h"
 #include "pwrbtn.h"
 #include <unistd.h>
@@ -117,6 +118,11 @@ int main(void)
     mesh_set_enabled(settings_mesh_enabled());
     mesh_init();
 
+    /* Module GPS (NEO-6M sur /dev/serial0). Non bloquant : no-op si absent.
+     * Respecte le choix persistant (gps_enabled). */
+    gps_set_enabled(settings_gps_enabled());
+    gps_init();
+
     ui_init();
     ui_show_splash(after_splash);
 
@@ -126,6 +132,7 @@ int main(void)
 
     while (1) {
         mesh_poll();
+        gps_poll();
         power_save_tick();
         uint32_t idle = lv_timer_handler();
         if (idle > 20) idle = 20;

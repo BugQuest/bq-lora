@@ -30,6 +30,9 @@ enum {
     APP_ABOUT   = 8,
     APP_CAMERA  = 9,
     APP_GALLERY = 10,
+    APP_DIAG    = 11,
+    APP_GPS     = 12,
+    APP_MAP     = 13,
 };
 
 extern int       cur_tab;          /* app courante (cf. enum APP_*) */

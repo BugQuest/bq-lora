@@ -11,10 +11,14 @@
 #include "ui_camera.h"
 #include "ui_about.h"
 #include "ui_nodes.h"
+#include "ui_diag.h"
+#include "ui_gps.h"
+#include "ui_map.h"
 #include "ui_chat.h"
 #include "ui_radio.h"
 #include "ui_dialog.h"
 #include "mesh.h"
+#include "gps.h"
 #include "calib.h"
 #include "sys.h"
 #include "settings.h"
@@ -75,6 +79,7 @@ lv_obj_t *label(lv_obj_t *parent, const char *txt, const lv_font_t *font, uint32
 static lv_obj_t *tb_clock, *tb_name, *tb_back;
 /* barre d'état verticale (droite) : icônes système + LoRa */
 static lv_obj_t *sb_usb, *sb_wifi, *sb_link, *sb_nodes, *sb_util, *sb_batt;
+static lv_obj_t *sb_gps, *sb_gps_val;
 /* ----- Warnings (auto-cachees quand pas d'alerte) -----
  * - throttle/sous-tension : magenta (en cours) ou ambre (deja eu)
  * - CPU temp >= 70C : ambre, >= 80C : magenta, avec valeur en C
@@ -168,6 +173,28 @@ static void statusbar_refresh(lv_timer_t *t) {
     bool ap = sys_hotspot_active();
     uint32_t wcol = ap ? CY_MAGENTA : (wifi_up ? CY_CYAN : CY_BORDER);
     lv_obj_set_style_text_color(sb_wifi, lv_color_hex(wcol), 0);
+
+    /* --- GPS : gris=coupe, dim=pas de lien, ambre=lien sans fix, vert=fix --- */
+    if (sb_gps) {
+        const gps_state_t *gp = gps_state();
+        uint32_t gcol; const char *gtxt; char gbuf[8];
+        if (!gps_enabled()) {
+            gcol = CY_BORDER; gtxt = "off";
+        } else if (!gps_connected()) {
+            gcol = CY_DIM; gtxt = "--";
+        } else if (!gp->valid) {
+            gcol = CY_AMBER;
+            snprintf(gbuf, sizeof(gbuf), "%d", gp->sats_view); gtxt = gbuf;
+        } else {
+            gcol = CY_GREEN;
+            snprintf(gbuf, sizeof(gbuf), "%d", gp->sats_used); gtxt = gbuf;
+        }
+        lv_obj_set_style_text_color(sb_gps, lv_color_hex(gcol), 0);
+        if (sb_gps_val) {
+            lv_label_set_text(sb_gps_val, gtxt);
+            lv_obj_set_style_text_color(sb_gps_val, lv_color_hex(gcol), 0);
+        }
+    }
 
     /* --- LoRa / mesh --- */
     bool link = mesh_connected();
@@ -360,6 +387,7 @@ static void build_statusbar(lv_obj_t *parent) {
     /* --- système --- */
     sb_usb  = sb_item(sb, LV_SYMBOL_USB,  NULL, CY_BORDER, NULL);
     sb_wifi = sb_item(sb, LV_SYMBOL_WIFI, NULL, CY_BORDER, NULL);
+    sb_gps  = sb_item(sb, LV_SYMBOL_GPS,  "--", CY_BORDER, &sb_gps_val);  /* module GPS : etat + nb sats */
 
     /* séparateur */
     lv_obj_t *sep = lv_obj_create(sb);
@@ -404,6 +432,9 @@ static void mesh_refresh_cb(lv_timer_t *t) {
     /* Vue NODES : maj incrémentale à chaque tick (nouveaux nœuds, signaux ET
      * rafraîchissement du « vu il y a X ») sans recréer la liste -> scroll gardé. */
     ui_nodes_sync_if_visible();   /* maj NODES si visible */
+    ui_diag_sync_if_visible();    /* maj DIAG RF si visible (trafic live) */
+    ui_gps_sync_if_visible();     /* maj GPS si visible */
+    ui_map_sync_if_visible();     /* maj CARTE si visible (geoloc + noeuds) */
 
     if (!mesh_take_dirty()) return;
     ui_chanmgr_refresh_if_open();   /* canaux changés -> rafraîchit le gestionnaire */
@@ -1137,6 +1168,9 @@ static void show_tab_now(int app) {
      * la replacer sous content pour qu'elle soit bien libérée par le clean */
     ui_chat_reset();          /* nullifie compose / msg_list + cache clavier */
     ui_nodes_reset();         /* nullifie nodes_list (sinon timer mesh_refresh segfault) */
+    ui_diag_reset();          /* nullifie diag_list (idem) */
+    ui_gps_reset();           /* nullifie les widgets GPS (idem) */
+    ui_map_reset();           /* nullifie les widgets CARTE (idem) */
     /* Entree dans CHAT depuis une autre app -> demarre sur la liste des
      * conversations (conv_cb met CV_CHAT et reste sur CHAT, donc pas de reset). */
     if (app == APP_CHAT && cur_tab != APP_CHAT) ui_chat_enter_tab();
@@ -1158,6 +1192,9 @@ static void show_tab_now(int app) {
         case APP_HOME:    build_home();          break;
         case APP_CHAT:    ui_chat_build();       break;
         case APP_NODES:   ui_nodes_build();         break;
+        case APP_DIAG:    ui_diag_build();          break;
+        case APP_GPS:     ui_gps_build();           break;
+        case APP_MAP:     ui_map_build();           break;
         case APP_SYS:     build_sys();           break;
         case APP_HOTSPOT: ui_hotspot_build();     break;
 #if CFG_BADUSB
@@ -1205,6 +1242,9 @@ typedef struct {
 static const app_card_t HOME_APPS[] = {
     { APP_CHAT,    STR_TAB_CHAT,     LV_SYMBOL_ENVELOPE,  CY_CYAN    },
     { APP_NODES,   STR_TAB_NODES,    LV_SYMBOL_GPS,       CY_CYAN    },
+    { APP_DIAG,    STR_TAB_DIAG,     LV_SYMBOL_CHARGE,    CY_CYAN    },
+    { APP_GPS,     STR_TAB_GPS,      LV_SYMBOL_GPS,       CY_GREEN   },
+    { APP_MAP,     STR_TAB_MAP,      LV_SYMBOL_DIRECTORY, CY_GREEN   },
     { APP_WIFI,    STR_SEC_WIFI,     LV_SYMBOL_WIFI,      CY_CYAN    },
 #if CFG_BLUETOOTH
     { APP_BT,      STR_SEC_BLUETOOTH,LV_SYMBOL_BLUETOOTH, CY_CYAN    },
@@ -1223,7 +1263,7 @@ static const app_card_t HOME_APPS[] = {
 
 /* Apps nécessitant la liaison meshtasticd active. */
 static bool app_needs_mesh(int id) {
-    return id == APP_CHAT || id == APP_NODES;
+    return id == APP_CHAT || id == APP_NODES || id == APP_DIAG;
 }
 
 static void home_card_cb(lv_event_t *e) {
@@ -1241,6 +1281,17 @@ static void mesh_toggle_cb(lv_event_t *e) {
     bool en = !mesh_enabled();
     mesh_set_enabled(en);
     settings_set_mesh_enabled(en);
+    settings_save();
+    show_tab(APP_HOME);   /* reconstruit le hub pour refléter l'état */
+}
+
+/* Bascule le lecteur GPS (libere/reprend /dev/serial0). Modifie le comportement
+ * des apps CARTE et GPS (plus de position / "GPS off"). */
+static void gps_toggle_cb(lv_event_t *e) {
+    (void)e;
+    bool en = !gps_enabled();
+    gps_set_enabled(en);
+    settings_set_gps_enabled(en);
     settings_save();
     show_tab(APP_HOME);   /* reconstruit le hub pour refléter l'état */
 }
@@ -1300,7 +1351,7 @@ static void build_home(void) {
         uint32_t bcol = locked ? CY_DIM : a->color;
         uint32_t tcol = locked ? CY_DIM : CY_TEXT;
         lv_obj_t *c = lv_button_create(grid);
-        lv_obj_set_size(c, LV_PCT(46), 66);
+        lv_obj_set_size(c, LV_PCT(31), 52);
         lv_obj_set_style_radius(c, 2, 0);
         lv_obj_set_style_bg_color(c, lv_color_hex(CY_PANEL), 0);
         lv_obj_set_style_bg_opa(c, locked ? LV_OPA_50 : LV_OPA_COVER, 0);
@@ -1311,18 +1362,28 @@ static void build_home(void) {
         lv_obj_add_event_cb(c, home_card_cb, LV_EVENT_CLICKED, (void *)(intptr_t)a->app_id);
 
         lv_obj_t *ic = label(c, locked ? LV_SYMBOL_EYE_CLOSE : a->icon, &lv_font_montserrat_16, bcol);
-        lv_obj_align(ic, LV_ALIGN_CENTER, 0, -8);
+        lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, 0);
         lv_obj_t *lbl = label(c, tr(a->title_id), FONT_SMALL, tcol);
-        lv_obj_align(lbl, LV_ALIGN_BOTTOM_MID, 0, -3);
+        lv_obj_align(lbl, LV_ALIGN_BOTTOM_MID, 0, 0);
 
         if (a->app_id == APP_CHAT) home_msg_card = c;   /* support du badge non-lus */
     }
     update_msg_badge();
 
-    /* bascule MESH : l'UI pilote le nœud, ou laisse la main au téléphone */
+    /* rangee de bascules : MESH (pilote le nœud / laisse la main au tel) + GPS */
+    lv_obj_t *row = lv_obj_create(col);
+    lv_obj_set_size(row, LV_PCT(100), 40);
+    flat(row);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 6, 0);
+
+    /* bascule MESH */
     uint32_t mcol = men ? CY_GREEN : CY_AMBER;
-    lv_obj_t *mb = lv_button_create(col);
-    lv_obj_set_size(mb, LV_PCT(100), 40);
+    lv_obj_t *mb = lv_button_create(row);
+    lv_obj_set_height(mb, LV_PCT(100));
+    lv_obj_set_flex_grow(mb, 1);
     lv_obj_set_style_radius(mb, 2, 0);
     lv_obj_set_style_bg_opa(mb, LV_OPA_30, 0);
     lv_obj_set_style_bg_color(mb, lv_color_hex(mcol), 0);
@@ -1334,6 +1395,24 @@ static void build_home(void) {
                            men ? tr(STR_MESH_ACTIVE) : tr(STR_MESH_INACTIVE));
     lv_obj_t *ml = label(mb, mbb, FONT_SMALL, men ? CY_GREEN : CY_AMBER);
     lv_obj_center(ml);
+
+    /* bascule GPS */
+    bool gen = gps_enabled();
+    uint32_t gcol = gen ? CY_GREEN : CY_AMBER;
+    lv_obj_t *gb = lv_button_create(row);
+    lv_obj_set_height(gb, LV_PCT(100));
+    lv_obj_set_flex_grow(gb, 1);
+    lv_obj_set_style_radius(gb, 2, 0);
+    lv_obj_set_style_bg_opa(gb, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(gb, lv_color_hex(gcol), 0);
+    lv_obj_set_style_border_width(gb, 1, 0);
+    lv_obj_set_style_border_color(gb, lv_color_hex(gcol), 0);
+    lv_obj_set_style_shadow_width(gb, 0, 0);
+    lv_obj_add_event_cb(gb, gps_toggle_cb, LV_EVENT_CLICKED, NULL);
+    char gbb[64]; snprintf(gbb, sizeof(gbb), LV_SYMBOL_GPS "  %s",
+                           gen ? tr(STR_GPS_ACTIVE) : tr(STR_GPS_INACTIVE));
+    lv_obj_t *gl = label(gb, gbb, FONT_SMALL, gen ? CY_GREEN : CY_AMBER);
+    lv_obj_center(gl);
 }
 
 

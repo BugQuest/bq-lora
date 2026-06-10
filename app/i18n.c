@@ -13,9 +13,11 @@ static const char *FR[STR_COUNT] = {
     [STR_TAB_HOTSPOT] = "HOTSPOT", [STR_TAB_BADUSB] = "BAD USB",
     [STR_TAB_ABOUT] = "A PROPOS",
     [STR_TAB_CAMERA] = "CAMERA", [STR_TAB_GALLERY] = "GALERIE",
+    [STR_TAB_DIAG] = "DIAG RF", [STR_TAB_GPS] = "GPS", [STR_TAB_MAP] = "CARTE",
 
     /* topbar */
     [STR_MESH_ACTIVE] = "MESH actif", [STR_MESH_INACTIVE] = "MESH inactif",
+    [STR_GPS_ACTIVE] = "GPS actif", [STR_GPS_INACTIVE] = "GPS coupe",
 
     /* NODES */
     [STR_NODES_TITLE] = "NODES",
@@ -223,9 +225,11 @@ static const char *EN[STR_COUNT] = {
     [STR_TAB_HOTSPOT] = "HOTSPOT", [STR_TAB_BADUSB] = "BAD USB",
     [STR_TAB_ABOUT] = "ABOUT",
     [STR_TAB_CAMERA] = "CAMERA", [STR_TAB_GALLERY] = "GALLERY",
+    [STR_TAB_DIAG] = "RF DIAG", [STR_TAB_GPS] = "GPS", [STR_TAB_MAP] = "MAP",
 
     /* topbar */
     [STR_MESH_ACTIVE] = "MESH on", [STR_MESH_INACTIVE] = "MESH off",
+    [STR_GPS_ACTIVE] = "GPS on", [STR_GPS_INACTIVE] = "GPS off",
 
     /* NODES */
     [STR_NODES_TITLE] = "NODES",

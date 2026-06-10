@@ -21,6 +21,10 @@ typedef struct {
     uint32_t    last_heard; /* epoch du dernier contact (tri/affichage) */
     const char *last;       /* dernier contact relatif, ex "2m" */
     bool        self;       /* true = ce nœud-ci */
+    bool        has_pos;    /* true = position GPS connue (POSITION_APP recu) */
+    double      lat, lon;   /* degres decimaux (valides si has_pos) */
+    int32_t     alt;        /* altitude m (valide si has_pos) */
+    uint32_t    pos_epoch;  /* epoch de la derniere position */
 } mesh_node_t;
 
 typedef struct {
@@ -134,6 +138,41 @@ typedef struct {
     unsigned packets_nodeinfo;/* paquets NODEINFO_APP decodes (annonces de noeuds) */
 } mesh_stats_t;
 const mesh_stats_t *mesh_stats(void);
+
+/* ---- Journal des paquets radio (vue DIAG / analyse RF) ----
+ * Chaque paquet recu d'un AUTRE noeud est trace ici, qu'il soit decode ou
+ * non (un paquet chiffre pour un canal qu'on n'a pas configure apparait avec
+ * decoded=false). Ring buffer : mesh_pktlog(0) = le plus recent. */
+#define MESH_PKTLOG_LEN 64
+typedef struct {
+    uint32_t epoch;     /* horodatage reception */
+    uint32_t from;      /* num noeud emetteur */
+    uint32_t to;        /* destinataire (0xFFFFFFFF = broadcast) */
+    uint32_t id;        /* id paquet */
+    uint8_t  chan;      /* index de canal (hash) */
+    uint8_t  portnum;   /* PortNum si decode, 0 sinon */
+    bool     decoded;   /* false = chiffre / non decodable */
+    bool     have_snr;  /* true = snr valide */
+    int16_t  rssi;      /* dBm */
+    int8_t   snr;       /* dB (arrondi) */
+    uint16_t len;       /* taille payload Data (octets) */
+} mesh_pktlog_t;
+int                 mesh_pktlog_count(void);
+const mesh_pktlog_t *mesh_pktlog(int idx);
+
+/* Compteurs cumulatifs par type de paquet (depuis un autre noeud). */
+typedef struct {
+    unsigned text;        /* messages texte */
+    unsigned position;    /* positions GPS */
+    unsigned nodeinfo;    /* annonces de noeud */
+    unsigned routing;     /* ACK / routage */
+    unsigned admin;       /* AdminMessage */
+    unsigned telemetry;   /* telemetrie (batt, env...) */
+    unsigned traceroute;  /* traceroute */
+    unsigned other;       /* autre port decode */
+    unsigned encrypted;   /* recu mais non decodable (pas la cle/canal) */
+} mesh_port_stats_t;
+const mesh_port_stats_t *mesh_port_stats(void);
 /* True (et reset) si un paquet RX est arrive depuis le dernier appel.
  * Utilise pour faire clignoter une icone "live" dans la statusbar. */
 bool                mesh_take_rx_pulse(void);

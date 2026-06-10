@@ -38,6 +38,7 @@
 #define PORT_ROUTING     5
 #define PORT_ADMIN       6
 #define PORT_TELEMETRY   67
+#define PORT_TRACEROUTE  70
 
 #define HEARTBEAT_SECS   30
 #define RECONNECT_SECS   5
@@ -65,6 +66,11 @@ typedef struct {
     int16_t     hist_rssi[MESH_HIST_LEN];
     uint8_t     hist_len;
     uint8_t     hist_head;
+    /* Position GPS (POSITION_APP). Persistee avec le reste. */
+    bool        has_pos;
+    double      lat, lon;
+    int32_t     alt;
+    uint32_t    pos_epoch;
 } node_slot_t;
 
 typedef struct {
@@ -110,6 +116,50 @@ static uint32_t    s_my_num;
 static bool        s_dirty;
 static mesh_stats_t s_stats;
 static bool        s_rx_pulse;
+
+/* ---- Journal des paquets radio (vue DIAG) ----
+ * Ring buffer des derniers paquets recus d'un AUTRE noeud (decodes ou non),
+ * + compteurs cumulatifs par type de port. Sert au diagnostic RF : voir en
+ * direct ce qui arrive sur les ondes, meme si on n'a pas la cle pour decoder. */
+static mesh_pktlog_t   s_pktlog[MESH_PKTLOG_LEN];
+static int             s_pktlog_head;    /* index de la prochaine ecriture */
+static int             s_pktlog_count;   /* nombre d'entrees valides (<= LEN) */
+static mesh_port_stats_t s_port_stats;
+
+static void port_stats_add(uint32_t portnum, bool decoded)
+{
+    if (!decoded) { s_port_stats.encrypted++; return; }
+    switch (portnum) {
+        case PORT_TEXT:       s_port_stats.text++;       break;
+        case PORT_POSITION:   s_port_stats.position++;   break;
+        case PORT_NODEINFO:   s_port_stats.nodeinfo++;   break;
+        case PORT_ROUTING:    s_port_stats.routing++;    break;
+        case PORT_ADMIN:      s_port_stats.admin++;      break;
+        case PORT_TELEMETRY:  s_port_stats.telemetry++;  break;
+        case PORT_TRACEROUTE: s_port_stats.traceroute++; break;
+        default:              s_port_stats.other++;      break;
+    }
+}
+
+static void pktlog_add(uint32_t from, uint32_t to, uint32_t id, uint8_t chan,
+                       uint8_t portnum, bool decoded, bool have_snr,
+                       float snr, int rssi, uint16_t len)
+{
+    mesh_pktlog_t *p = &s_pktlog[s_pktlog_head];
+    p->epoch    = (uint32_t)time(NULL);
+    p->from     = from;
+    p->to       = to;
+    p->id       = id;
+    p->chan     = chan;
+    p->portnum  = portnum;
+    p->decoded  = decoded;
+    p->have_snr = have_snr;
+    p->rssi     = (int16_t)rssi;
+    p->snr      = have_snr ? (int8_t)(snr < 0 ? snr - 0.5f : snr + 0.5f) : 0;
+    p->len      = len;
+    s_pktlog_head = (s_pktlog_head + 1) % MESH_PKTLOG_LEN;
+    if (s_pktlog_count < MESH_PKTLOG_LEN) s_pktlog_count++;
+}
 static time_t      s_reload_at;        /* != 0 : re-demander la config à cette date */
 
 /* Persistance de la liste des nœuds (trace locale, survit aux redémarrages). */
@@ -563,7 +613,35 @@ static void parse_nodeinfo(const uint8_t *d, size_t n)
     s_dirty = true;
 }
 
-static void parse_data(const uint8_t *d, size_t n,
+/* Position protobuf : latitude_i (1, sfixed32, deg*1e7), longitude_i (2,
+ * sfixed32), altitude (3, int32 varint, metres). Attache au slot 'from'. */
+static void parse_position(const uint8_t *d, size_t n, uint32_t from)
+{
+    pb_reader r; pb_reader_init(&r, d, n);
+    uint32_t f, w;
+    int32_t lat_i = 0, lon_i = 0, alt = 0;
+    bool have_lat = false, have_lon = false;
+    while (pb_read_tag(&r, &f, &w)) {
+        uint64_t v; uint32_t fx;
+        if (f == 1 && w == 5 && pb_read_fixed32(&r, &fx)) { lat_i = (int32_t)fx; have_lat = true; }
+        else if (f == 2 && w == 5 && pb_read_fixed32(&r, &fx)) { lon_i = (int32_t)fx; have_lon = true; }
+        else if (f == 3 && w == 0 && pb_read_varint(&r, &v)) alt = (int32_t)(uint32_t)v;
+        else pb_skip(&r, w);
+    }
+    if (!have_lat || !have_lon) return;
+    if (lat_i == 0 && lon_i == 0) return;     /* position nulle = invalide */
+    node_slot_t *s = node_get_or_add(from);
+    if (!s) return;
+    s->lat = lat_i * 1e-7;
+    s->lon = lon_i * 1e-7;
+    s->alt = alt;
+    s->has_pos = true;
+    s->pos_epoch = (uint32_t)time(NULL);
+    s_nodes_save_pending = true;
+    s_dirty = true;
+}
+
+static uint32_t parse_data(const uint8_t *d, size_t n,
                        uint32_t from, uint32_t to, uint32_t chan, uint32_t pkt_id)
 {
     pb_reader r; pb_reader_init(&r, d, n);
@@ -581,6 +659,8 @@ static void parse_data(const uint8_t *d, size_t n,
 
     if (portnum == PORT_TEXT && payload)
         add_text((int)chan, from, to, pkt_id, payload, pll);
+    else if (portnum == PORT_POSITION && payload && from)
+        parse_position(payload, pll, from);
     else if (portnum == PORT_ROUTING)
         ack_message(req_id);
     else if (portnum == PORT_NODEINFO && payload && from) {
@@ -594,6 +674,7 @@ static void parse_data(const uint8_t *d, size_t n,
         }
         s_stats.packets_nodeinfo++;
     }
+    return portnum;
 }
 
 static void parse_packet(const uint8_t *d, size_t n)
@@ -620,12 +701,22 @@ static void parse_packet(const uint8_t *d, size_t n)
      * exclut nos propres paquets (telemetrie device, nodeinfo, routing, echos
      * de nos messages) que meshtasticd nous renvoie aussi : sinon le compteur
      * gonfle sans qu'on ait rien recu par les ondes (cf. num_packets_rx=0). */
-    if (from && from != s_my_num) {
+    bool foreign = (from && from != s_my_num);
+    if (foreign) {
         s_stats.packets_rx++;
         s_rx_pulse = true;
         node_update_signal(from, have_snr, snr, rssi);
     }
-    if (dec) parse_data(dec, decl, from, to, chan, pkt_id);
+    uint32_t portnum = 0;
+    if (dec) portnum = parse_data(dec, decl, from, to, chan, pkt_id);
+
+    /* Journal DIAG : on trace TOUT paquet d'un autre noeud, decode ou non
+     * (un paquet chiffre pour un canal qu'on n'a pas reste visible ici). */
+    if (foreign) {
+        pktlog_add(from, to, pkt_id, (uint8_t)chan, (uint8_t)portnum,
+                   dec != NULL, have_snr, snr, rssi, (uint16_t)decl);
+        port_stats_add(portnum, dec != NULL);
+    }
 }
 
 static void parse_channel(const uint8_t *d, size_t n)
@@ -1063,6 +1154,20 @@ bool mesh_take_dirty(void)
 
 const mesh_stats_t *mesh_stats(void) { return &s_stats; }
 
+const mesh_port_stats_t *mesh_port_stats(void) { return &s_port_stats; }
+
+int mesh_pktlog_count(void) { return s_pktlog_count; }
+
+/* idx 0 = paquet le plus recent. Renvoie NULL si hors borne. */
+const mesh_pktlog_t *mesh_pktlog(int idx)
+{
+    if (idx < 0 || idx >= s_pktlog_count) return NULL;
+    /* s_pktlog_head pointe sur la prochaine ecriture : le plus recent est a
+     * head-1, puis on recule. */
+    int pos = (s_pktlog_head - 1 - idx + 2 * MESH_PKTLOG_LEN) % MESH_PKTLOG_LEN;
+    return &s_pktlog[pos];
+}
+
 void mesh_refresh_config(void)
 {
     if (s_fd < 0) return;
@@ -1104,6 +1209,11 @@ const mesh_node_t *mesh_node(int i)
     s->pub.first_heard = s->first_heard;
     s->pub.last_heard  = s->last_heard;
     s->pub.best_snr    = s->best_snr;
+    s->pub.has_pos     = s->has_pos;
+    s->pub.lat         = s->lat;
+    s->pub.lon         = s->lon;
+    s->pub.alt         = s->alt;
+    s->pub.pos_epoch   = s->pos_epoch;
     fmt_rel(s->last, sizeof(s->last), s->last_heard);
     return &s->pub;
 }

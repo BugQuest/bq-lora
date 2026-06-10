@@ -13,10 +13,11 @@ typedef enum {
     /* ---------- onglets et navigation ---------- */
     STR_TAB_HOME, STR_TAB_NODES, STR_TAB_CHAT, STR_TAB_CHANNELS,
     STR_TAB_SYS,  STR_TAB_HOTSPOT, STR_TAB_BADUSB, STR_TAB_ABOUT,
-    STR_TAB_CAMERA, STR_TAB_GALLERY,
+    STR_TAB_CAMERA, STR_TAB_GALLERY, STR_TAB_DIAG, STR_TAB_GPS, STR_TAB_MAP,
 
     /* ---------- topbar / sb ---------- */
     STR_MESH_ACTIVE, STR_MESH_INACTIVE,
+    STR_GPS_ACTIVE, STR_GPS_INACTIVE,
 
     /* ---------- vue NODES ---------- */
     STR_NODES_TITLE,
