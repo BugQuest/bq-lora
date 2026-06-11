@@ -535,7 +535,9 @@ meshtastic-screen/
       `gps_poll()` réduite en veille écran (économie batterie) ; **précision** :
       configuration UBX du module à l'ouverture (CFG-NAV5 modèle *piéton* + Static
       Hold, CFG-SBAS EGNOS, port en `O_RDWR` — Pi TX → GPS RX requis) + filtre
-      exponentiel adaptatif logiciel (anti-jitter à l'arrêt)
+      exponentiel adaptatif logiciel (anti-jitter à l'arrêt) ; **acquittements UBX**
+      (ACK/NAK) décodés en parallèle du flux NMEA et affichés dans la vue debug
+      (`NAV5:OK SBAS:OK ack/nak`) — confirme que la liaison TX et la config passent
 - [x] **SYSTÈME** — découpée en **3 sous-onglets** (chips en tête : SYSTÈME / RÉSEAU /
       RÉGLAGES) pour rester fluide malgré le bottleneck SPI de l'ILI9486 (chaque
       sous-onglet tient quasi dans la hauteur visible) :

@@ -66,9 +66,14 @@ static void gps_sync(void)
     }
 
     if (g_dev_lbl) {
-        char b[64];
-        snprintf(b, sizeof(b), "/dev/serial0  trames:%u%s",
-                 g->sentences, gps_connected() ? "" : "  (rien recu)");
+        char b[128];
+        const char *nav5 = g->ubx_nav5 < 0 ? "?" : (g->ubx_nav5 ? "OK" : "NAK");
+        const char *sbas = g->ubx_sbas < 0 ? "?" : (g->ubx_sbas ? "OK" : "NAK");
+        snprintf(b, sizeof(b),
+                 "/dev/serial0  trames:%u%s\n"
+                 "UBX NAV5:%s SBAS:%s  ack:%u nak:%u",
+                 g->sentences, gps_connected() ? "" : "  (rien recu)",
+                 nav5, sbas, g->ubx_ack, g->ubx_nak);
         lv_label_set_text(g_dev_lbl, b);
     }
 

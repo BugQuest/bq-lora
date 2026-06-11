@@ -43,6 +43,13 @@ typedef struct {
     uint32_t  last_fix;      /* epoch du dernier fix valide, 0 si jamais */
     uint32_t  last_rx;       /* epoch du dernier octet recu */
     unsigned  sentences;     /* trames NMEA parsees (diagnostic) */
+
+    /* Acquittements de la config UBX (CFG-NAV5 static hold, CFG-SBAS EGNOS).
+     * -1 = pas de reponse (TX non cable ?), 0 = refusee (NAK), 1 = acceptee (ACK). */
+    int8_t    ubx_nav5;      /* CFG-NAV5 (modele pieton + static hold) */
+    int8_t    ubx_sbas;      /* CFG-SBAS (EGNOS) */
+    uint8_t   ubx_ack;       /* nb total d'ACK recus */
+    uint8_t   ubx_nak;       /* nb total de NAK recus */
 } gps_state_t;
 
 void              gps_init(void);

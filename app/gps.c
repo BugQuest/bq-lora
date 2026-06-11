@@ -36,6 +36,13 @@ static double       s_flt_lat, s_flt_lon;
 static bool         s_flt_init;
 static uint32_t     s_flt_fix;        /* dernier last_fix deja lisse */
 
+/* reception UBX (machine a etats binaire, voir ubx_feed plus bas) */
+static int          s_ubx_st;         /* etat (0 = hors trame UBX) */
+static uint8_t      s_ubx_cls, s_ubx_id;
+static uint16_t     s_ubx_len, s_ubx_cnt;
+static uint8_t      s_ubx_pl[4];      /* on ne garde que le debut (suffit pour ACK) */
+static uint8_t      s_ubx_cka, s_ubx_ckb;
+
 static void lk_load(void)
 {
     FILE *f = fopen(LK_PATH, "r");
@@ -86,6 +93,10 @@ static void ubx_send(uint8_t cls, uint8_t id, const uint8_t *payload, uint16_t l
  * ne pas dependre de la sauvegarde flash (pile de sauvegarde absente/faible). */
 static void ubx_configure(void)
 {
+    /* on (re)part en "reponse attendue" : -1 tant qu'aucun ACK/NAK recu */
+    s_st.ubx_nav5 = -1; s_st.ubx_sbas = -1;
+    s_ubx_st = 0;       /* resync du parseur UBX */
+
     /* CFG-NAV5 (0x06 0x24, 36 o) : dynModel=3 (pieton) + static hold 0.8 m/s.
      * Le static hold fige activement la position sous le seuil de vitesse. */
     uint8_t nav5[36] = {0};
@@ -99,6 +110,47 @@ static void ubx_configure(void)
     /* CFG-SBAS (0x06 0x16, 8 o) : SBAS active (EGNOS en EU), range + diffCorr. */
     uint8_t sbas[8] = { 0x01, 0x03, 3, 0, 0, 0, 0, 0 };
     ubx_send(0x06, 0x16, sbas, 8);
+}
+
+/* ---- reception UBX : machine a etats binaire, lue en parallele du NMEA ---- */
+/* Le flux contient du NMEA (ASCII, termine par CR/LF) ET des trames UBX binaires
+ * (ACK/NAK de la config). On detecte la signature UBX (0xB5 0x62, hors plage
+ * ASCII donc sans collision avec le NMEA) et on consomme la trame ; tout octet
+ * non-UBX est rendu a l'accumulateur NMEA. */
+static void ubx_on_frame(void)
+{
+    /* ACK : classe 0x05, id 0x01 = ACK / 0x00 = NAK ; payload = cls,id acquittes */
+    if (s_ubx_cls != 0x05 || s_ubx_len < 2) return;
+    bool ok = (s_ubx_id == 0x01);
+    uint8_t acls = s_ubx_pl[0], aid = s_ubx_pl[1];
+    if      (acls == 0x06 && aid == 0x24) s_st.ubx_nav5 = ok ? 1 : 0;  /* CFG-NAV5 */
+    else if (acls == 0x06 && aid == 0x16) s_st.ubx_sbas = ok ? 1 : 0;  /* CFG-SBAS */
+    if (ok) { if (s_st.ubx_ack < 255) s_st.ubx_ack++; }
+    else    { if (s_st.ubx_nak < 255) s_st.ubx_nak++; }
+}
+
+/* Consomme un octet cote UBX. Renvoie true si l'octet appartient a une trame
+ * UBX (a ne PAS donner au parseur NMEA), false sinon. */
+static bool ubx_feed(uint8_t c)
+{
+    switch (s_ubx_st) {
+    case 0:  if (c == 0xB5) { s_ubx_st = 1; return true; } return false;
+    case 1:  if (c == 0x62) { s_ubx_st = 2; return true; }
+             if (c == 0xB5) return true;           /* re-sync sur 0xB5 */
+             s_ubx_st = 0; return false;            /* fausse alerte -> NMEA */
+    case 2:  s_ubx_cls = c; s_ubx_cka = c; s_ubx_ckb = c; s_ubx_st = 3; return true;
+    case 3:  s_ubx_id  = c; s_ubx_cka += c; s_ubx_ckb += s_ubx_cka; s_ubx_st = 4; return true;
+    case 4:  s_ubx_len = c; s_ubx_cka += c; s_ubx_ckb += s_ubx_cka; s_ubx_st = 5; return true;
+    case 5:  s_ubx_len |= (uint16_t)c << 8; s_ubx_cka += c; s_ubx_ckb += s_ubx_cka;
+             s_ubx_cnt = 0; s_ubx_st = s_ubx_len ? 6 : 7; return true;
+    case 6:  if (s_ubx_cnt < sizeof(s_ubx_pl)) s_ubx_pl[s_ubx_cnt] = c;
+             s_ubx_cnt++; s_ubx_cka += c; s_ubx_ckb += s_ubx_cka;
+             if (s_ubx_cnt >= s_ubx_len) s_ubx_st = 7;
+             return true;
+    case 7:  s_ubx_st = (c == s_ubx_cka) ? 8 : 0; return true;   /* ck_a */
+    case 8:  if (c == s_ubx_ckb) ubx_on_frame(); s_ubx_st = 0; return true;  /* ck_b */
+    default: s_ubx_st = 0; return false;
+    }
 }
 
 static void gps_open(void)
@@ -283,11 +335,12 @@ void gps_poll(void)
     while ((got = read(s_fd, buf, sizeof(buf))) > 0) {
         any = true;
         for (ssize_t i = 0; i < got; i++) {
-            char c = buf[i];
+            uint8_t c = (uint8_t)buf[i];
+            if (ubx_feed(c)) continue;     /* octet consomme par une trame UBX */
             if (c == '\n' || c == '\r') {
                 if (s_len > 0) { s_line[s_len] = '\0'; parse_line(s_line); s_len = 0; }
             } else if (s_len < LINE_MAX - 1) {
-                s_line[s_len++] = c;
+                s_line[s_len++] = (char)c;
             } else {
                 s_len = 0;   /* trame trop longue -> on jette */
             }
