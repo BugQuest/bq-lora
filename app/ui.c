@@ -915,6 +915,33 @@ static void sys_build_system_tab(lv_obj_t *col)
     lv_obj_add_flag(upd_btn_install, LV_OBJ_FLAG_HIDDEN);
     upd_check_cb(NULL);
 
+    /* SECURITE : rootfs en lecture seule (systeme immuable). Place ici, pres des
+     * MISES A JOUR, car il faut le desactiver pour qu'une maj persiste. */
+    s = section(col, tr(STR_SEC_SECURITY));
+    label(s, tr(STR_RO_TITLE), FONT_BODY, CY_TEXT);
+    lv_obj_t *rr = lv_obj_create(s);
+    lv_obj_set_size(rr, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(rr); lv_obj_set_flex_flow(rr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(rr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(rr, LV_OBJ_FLAG_SCROLLABLE);
+    sys_lbl_ro_state = label(rr, "?", FONT_BODY, CY_DIM);
+    sys_btn_ro = lv_button_create(rr);
+    lv_obj_set_size(sys_btn_ro, 130, 30);
+    lv_obj_set_style_radius(sys_btn_ro, 2, 0);
+    lv_obj_set_style_bg_opa(sys_btn_ro, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(sys_btn_ro, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(sys_btn_ro, 1, 0);
+    lv_obj_set_style_border_color(sys_btn_ro, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_shadow_width(sys_btn_ro, 0, 0);
+    lv_obj_add_event_cb(sys_btn_ro, ro_toggle_cb, LV_EVENT_CLICKED, NULL);
+    sys_lbl_ro_btn = label(sys_btn_ro, "?", FONT_SMALL, CY_TEXT);
+    lv_obj_center(sys_lbl_ro_btn);
+    {
+        lv_obj_t *hint = label(s, tr(STR_RO_HINT), FONT_SMALL, CY_DIM);
+        lv_obj_set_width(hint, LV_PCT(100));
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    }
+
     /* LANGUE */
     s = section(col, tr(STR_SEC_LANG));
     lv_obj_t *lang_btn = lv_button_create(s);
@@ -992,32 +1019,6 @@ static void sys_build_network_tab(lv_obj_t *col)
     lv_obj_clear_flag(unrow, LV_OBJ_FLAG_SCROLLABLE);
     sys_btn_usb_share  = small_button(unrow, tr(STR_BTN_NET_SHARE),  CY_CYAN,  usb_net_share_cb);
     sys_btn_usb_client = small_button(unrow, tr(STR_BTN_NET_CLIENT), CY_AMBER, usb_net_client_cb);
-
-    /* SECURITE : rootfs en lecture seule (systeme immuable) */
-    s = section(col, tr(STR_SEC_SECURITY));
-    label(s, tr(STR_RO_TITLE), FONT_BODY, CY_TEXT);
-    lv_obj_t *rr = lv_obj_create(s);
-    lv_obj_set_size(rr, LV_PCT(100), LV_SIZE_CONTENT);
-    flat(rr); lv_obj_set_flex_flow(rr, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(rr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(rr, LV_OBJ_FLAG_SCROLLABLE);
-    sys_lbl_ro_state = label(rr, "?", FONT_BODY, CY_DIM);
-    sys_btn_ro = lv_button_create(rr);
-    lv_obj_set_size(sys_btn_ro, 130, 30);
-    lv_obj_set_style_radius(sys_btn_ro, 2, 0);
-    lv_obj_set_style_bg_opa(sys_btn_ro, LV_OPA_30, 0);
-    lv_obj_set_style_bg_color(sys_btn_ro, lv_color_hex(CY_CYAN), 0);
-    lv_obj_set_style_border_width(sys_btn_ro, 1, 0);
-    lv_obj_set_style_border_color(sys_btn_ro, lv_color_hex(CY_CYAN), 0);
-    lv_obj_set_style_shadow_width(sys_btn_ro, 0, 0);
-    lv_obj_add_event_cb(sys_btn_ro, ro_toggle_cb, LV_EVENT_CLICKED, NULL);
-    sys_lbl_ro_btn = label(sys_btn_ro, "?", FONT_SMALL, CY_TEXT);
-    lv_obj_center(sys_lbl_ro_btn);
-    {
-        lv_obj_t *hint = label(s, tr(STR_RO_HINT), FONT_SMALL, CY_DIM);
-        lv_obj_set_width(hint, LV_PCT(100));
-        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-    }
 }
 
 static void sys_build_settings_tab(lv_obj_t *col)
