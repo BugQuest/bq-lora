@@ -1,0 +1,9 @@
+# Symlink stable /dev/fb_spi vers le panneau SPI (driver fbtft fb_ili9486),
+# quel que soit le numero fbN qui lui est attribue au boot.
+#
+# Contexte : le firmware enregistre un simple-framebuffer sur fb0 tres tot, puis
+# fbtft enregistre le panneau SPI sur fb1, puis vc4-drm retire le simplefb. Selon
+# le timing, /dev/fb0 est tantot le simplefb (mauvais, l'image part dans le vide),
+# tantot absent, tantot le panneau SPI -> ecran noir intermittent au demarrage.
+# On resout par NOM (ATTR{name}) : udev cree /dev/fb_spi -> le bon fbN, sans course.
+SUBSYSTEM=="graphics", KERNEL=="fb[0-9]*", ATTR{name}=="fb_ili9486", SYMLINK+="fb_spi"

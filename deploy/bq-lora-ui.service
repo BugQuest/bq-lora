@@ -11,10 +11,10 @@ WorkingDirectory=/home/bq-lora/bq-lora-ui
 # Detache la console framebuffer (vtcon1) -> ecran 100% propre, sans texte ni curseur.
 # Le prefixe "+" force l'execution en root meme si le service tourne en bq-lora.
 ExecStartPre=+/bin/sh -c 'echo 0 > /sys/class/vtconsole/vtcon1/bind || true'
-# Attend que le framebuffer SPI soit pret. Sans HDMI branche, vc4-drm n'expose
-# pas /dev/fb0 et fbtft (ecran SPI) prend /dev/fb1. Le binaire ouvre /dev/fb0
-# par defaut -> symlink fb0 -> fb1 si fb0 manque. Le prefixe '+' = root.
-ExecStartPre=+/bin/sh -c 'until [ -e /dev/fb0 ] || [ -e /dev/fb1 ]; do sleep 0.2; done; [ -e /dev/fb0 ] || ln -sf /dev/fb1 /dev/fb0'
+# Garantit /dev/fb_spi -> panneau SPI (driver fb_ili9486) par NOM, insensible a
+# la numerotation fb0/fb1 (course simplefb firmware vs fbtft au boot). Le binaire
+# ouvre /dev/fb_spi. Le prefixe '+' force l'execution en root (ln dans /dev).
+ExecStartPre=+/usr/local/sbin/bq-lora-ui-fb-spi-link
 
 ExecStart=/home/bq-lora/bq-lora-ui/build/bq-lora-ui
 

@@ -156,11 +156,24 @@ fin de `/boot/firmware/config.txt`, puis redémarrer.
 Vérification après reboot :
 
 ```bash
-ls /dev/fb*                                   # /dev/fb0 attendu
+ls -l /dev/fb_spi                             # symlink -> fbN du panneau SPI
 dmesg | grep -iE 'fb_ili9486|ads7846'         # init driver + tactile
 # test couleur (vert plein écran), le rétroéclairage doit être allumé :
-python3 -c "open('/dev/fb0','wb').write(bytes([0xE0,0x07])*480*320)"
+python3 -c "open('/dev/fb_spi','wb').write(bytes([0xE0,0x07])*480*320)"
 ```
+
+> **Écran noir intermittent au démarrage à froid (résolu).** Le firmware
+> enregistre un `simple-framebuffer` sur **fb0** très tôt, puis `fbtft` place le
+> panneau SPI sur **fb1**, et `vc4-drm` retire ensuite le simplefb. Selon le
+> timing, `/dev/fb0` finissait tantôt sur le simplefb (l'image partait dans le
+> vide), tantôt absent — et le splash bloquait alors sur `until [ -e /dev/fb0 ]`,
+> empêchant l'UI de démarrer (écran noir, rétroéclairage et SSH OK, corrigé
+> uniquement par un cycle d'alimentation). La règle udev
+> [`deploy/99-bq-lora-ui-fb.rules`](deploy/99-bq-lora-ui-fb.rules) crée un
+> symlink **stable `/dev/fb_spi`** vers le bon `fbN` **par nom**
+> (`ATTR{name}=="fb_ili9486"`), insensible à la numérotation. L'app, le splash et
+> les services pointent dessus ; [`deploy/fb-spi-link.sh`](deploy/fb-spi-link.sh)
+> sert de filet si udev n'a pas encore agi.
 
 ---
 
@@ -443,7 +456,9 @@ meshtastic-screen/
 │   ├── bq-lora-ui.service         # autostart de l'app
 │   ├── bq-lora-ui-splash.service  # boot splash + détache la console
 │   ├── bq-lora-ui-shutdown.service# splash d'arrêt/redémarrage
-│   ├── shutdown-splash.sh      # rendu du splash d'arrêt (après libération de fb0)
+│   ├── shutdown-splash.sh      # rendu du splash d'arrêt (après libération du fb)
+│   ├── 99-bq-lora-ui-fb.rules  # règle udev : symlink stable /dev/fb_spi (par nom)
+│   ├── fb-spi-link.sh          # filet : garantit /dev/fb_spi si udev n'a pas agi
 │   ├── bq-lora-ui-btserial.service# console série Bluetooth (SPP/RFCOMM)
 │   ├── bluetooth-compat.conf  # bluetoothd --compat (requis pour sdptool/SPP)
 │   ├── bq-lora-ui-ctl             # helper privilégié (NOPASSWD limité)
@@ -459,7 +474,7 @@ meshtastic-screen/
 │   ├── usb0-keepup.sh         # dispatcher NM : ré-active usb0 s'il tombe
 │   └── usb0-ignore-carrier.conf# NM : monte usb0 sans attendre de carrier
 ├── tools/                     # utilitaires Python (pas dans le binaire C)
-│   ├── splash.py              # boot splash PIL → fb0
+│   ├── splash.py              # boot splash PIL → /dev/fb_spi
 │   ├── cam.py                 # JPEG → buffer brut RGB565 pour le canvas (preview/galerie)
 │   ├── maptiles.py            # télécharge des tuiles CARTO → RGB565 256×256 (.bin) pour la carte
 │   ├── badusb.py              # interpréteur DuckyScript → frappes HID

@@ -2,18 +2,25 @@
 # Splash cyberpunk "BugQuest // LORA", blit RGB565 sur /dev/fb0.
 # Sans argument : splash de boot. Avec --status/--accent : arret/redemarrage.
 from PIL import Image, ImageDraw, ImageFont
-import struct, argparse
+import struct, argparse, os
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--status', default='[ initialisation ]')  # bandeau du bas
 ap.add_argument('--accent', default='cyan')                # cyan | magenta
 args = ap.parse_args()
 
+# Panneau SPI : /dev/fb_spi (symlink udev stable lie au nom fb_ili9486) sinon
+# /dev/fb0. On resout le vrai noeud fbN pour lire ses parametres dans /sys :
+# /sys/class/graphics/fb0 n'existe pas quand fb0 est un symlink.
+FB = '/dev/fb_spi' if os.path.exists('/dev/fb_spi') else '/dev/fb0'
+FBN = os.path.basename(os.path.realpath(FB))   # ex: 'fb1'
+SYS = '/sys/class/graphics/' + FBN
+
 def rd(p):
     return open(p).read().strip()
 
-w, h = [int(v) for v in rd('/sys/class/graphics/fb0/virtual_size').split(',')]
-stride = int(rd('/sys/class/graphics/fb0/stride'))
+w, h = [int(v) for v in rd(SYS + '/virtual_size').split(',')]
+stride = int(rd(SYS + '/stride'))
 
 CY = (0, 229, 255)
 MA = (255, 42, 109)
@@ -78,4 +85,4 @@ for y in range(h):
         row += struct.pack('<H', ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3))
     row += bytes(stride - len(row))
     buf += row
-open('/dev/fb0', 'wb').write(bytes(buf))
+open(FB, 'wb').write(bytes(buf))

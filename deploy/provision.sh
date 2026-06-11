@@ -185,6 +185,15 @@ install -m 644 "$SRC/deploy/bq-lora-ui-btserial.service" /etc/systemd/system/bq-
 systemctl daemon-reload
 systemctl restart bluetooth.service || true
 
+# Framebuffer SPI : symlink stable /dev/fb_spi (par NOM fb_ili9486) + filet shell.
+# Corrige l'ecran noir intermittent au demarrage a froid (course de numerotation
+# simplefb firmware vs fbtft : /dev/fb0 finissait tantot sur le simplefb, tantot
+# absent -> splash bloque sur 'until [ -e /dev/fb0 ]' -> UI jamais demarree).
+install -m 644 "$SRC/deploy/99-bq-lora-ui-fb.rules" /etc/udev/rules.d/99-bq-lora-ui-fb.rules
+install -m 755 "$SRC/deploy/fb-spi-link.sh" /usr/local/sbin/bq-lora-ui-fb-spi-link
+udevadm control --reload-rules || true
+udevadm trigger -s graphics --action=add || true
+
 # Services systemd
 install -m 644 "$SRC/deploy/bq-lora-ui.service" /etc/systemd/system/bq-lora-ui.service
 install -m 644 "$SRC/deploy/bq-lora-ui-splash.service" /etc/systemd/system/bq-lora-ui-splash.service

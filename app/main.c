@@ -106,8 +106,13 @@ int main(void)
     lv_init();
     lv_tick_set_cb(tick_cb);
 
+    /* Panneau SPI via le symlink stable /dev/fb_spi (regle udev liee au nom
+     * fb_ili9486) : insensible a la numerotation fb0/fb1 qui varie selon la
+     * course simplefb (firmware) vs fbtft au boot. Fallback /dev/fb0 si le
+     * symlink est absent (provisioning incomplet). */
     lv_display_t *disp = lv_linux_fbdev_create();
-    lv_linux_fbdev_set_file(disp, "/dev/fb0");
+    lv_linux_fbdev_set_file(disp, access("/dev/fb_spi", F_OK) == 0
+                                  ? "/dev/fb_spi" : "/dev/fb0");
 
     /* Pilote tactile maison (lecture brute + affine). */
     touch_init();

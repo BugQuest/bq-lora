@@ -7,8 +7,10 @@ Before=bq-lora-ui.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# Attend le framebuffer SPI
-ExecStartPre=/bin/sh -c 'until [ -e /dev/fb0 ]; do sleep 0.1; done'
+# Garantit /dev/fb_spi -> panneau SPI (par NOM) et attend son apparition.
+# Remplace l'ancien 'until [ -e /dev/fb0 ]' qui bloquait pour toujours quand le
+# panneau atterrit sur fb1 (course simplefb/fbtft) -> ecran noir intermittent.
+ExecStartPre=/usr/local/sbin/bq-lora-ui-fb-spi-link
 # Detache la console tot -> pas de texte de boot sur l'ecran
 ExecStartPre=/bin/sh -c 'echo 0 > /sys/class/vtconsole/vtcon1/bind || true'
 ExecStart=/usr/bin/python3 /home/bq-lora/bq-lora-ui/tools/splash.py
