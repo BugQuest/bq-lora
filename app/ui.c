@@ -919,13 +919,12 @@ static void sys_build_system_tab(lv_obj_t *col)
      * MISES A JOUR, car il faut le desactiver pour qu'une maj persiste. */
     s = section(col, tr(STR_SEC_SECURITY));
     label(s, tr(STR_RO_TITLE), FONT_BODY, CY_TEXT);
-    lv_obj_t *rr = lv_obj_create(s);
-    lv_obj_set_size(rr, LV_PCT(100), LV_SIZE_CONTENT);
-    flat(rr); lv_obj_set_flex_flow(rr, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(rr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(rr, LV_OBJ_FLAG_SCROLLABLE);
-    sys_lbl_ro_state = label(rr, "?", FONT_BODY, CY_DIM);
-    sys_btn_ro = lv_button_create(rr);
+    /* Etat sur sa propre ligne (texte parfois long -> evite le chevauchement du
+     * bouton), bouton seul en dessous. */
+    sys_lbl_ro_state = label(s, "?", FONT_BODY, CY_DIM);
+    lv_obj_set_width(sys_lbl_ro_state, LV_PCT(100));
+    lv_label_set_long_mode(sys_lbl_ro_state, LV_LABEL_LONG_WRAP);
+    sys_btn_ro = lv_button_create(s);
     lv_obj_set_size(sys_btn_ro, 130, 30);
     lv_obj_set_style_radius(sys_btn_ro, 2, 0);
     lv_obj_set_style_bg_opa(sys_btn_ro, LV_OPA_30, 0);
