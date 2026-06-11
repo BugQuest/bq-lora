@@ -205,6 +205,39 @@ systemctl enable bq-lora-ui-splash.service bq-lora-ui.service bq-lora-ui-shutdow
 systemctl start bq-lora-ui-splash.service bq-lora-ui.service || true
 systemctl start bq-lora-ui-shutdown.service || true
 
+# === Durcissement securite (idempotent) ===
+# Objectif : appareil discret et difficile a pirater. Ne touche PAS la RF.
+#
+# 1) Pare-feu : l'API Meshtastic (TCP 4403) n'est pas authentifiee -> on la
+#    reserve a lo (UI locale) + usb0 (tether de confiance). Injoignable depuis
+#    le WiFi/hotspot (wlan0). Table nft dediee (n'interfere pas avec nm-shared-*).
+install -d /etc/nftables.d
+install -m 644 "$SRC/deploy/firewall.nft" /etc/nftables.d/bq-lora-ui-firewall.nft
+install -m 644 "$SRC/deploy/firewall.service" /etc/systemd/system/bq-lora-ui-firewall.service
+systemctl daemon-reload
+systemctl enable bq-lora-ui-firewall.service || true
+systemctl restart bq-lora-ui-firewall.service || true
+
+# 2) SSH : interdit le login root, mots de passe off (cle uniquement), pas de
+#    forwarding X11/agent (surface inutile sur appareil headless).
+install -m 644 "$SRC/deploy/sshd-hardening.conf" /etc/ssh/sshd_config.d/10-bq-lora-ui.conf
+sshd -t && systemctl reload ssh || true
+
+# 3) avahi/mDNS : ne s'annonce que sur le tether USB (usb0), muet sur le WiFi
+#    domestique et le hotspot -> l'appareil n'est pas decouvrable sur le LAN.
+#    NB : casse l'acces par <hostname>.local en WiFi -> utiliser l'IP (ecran INFOS).
+sed -i -E 's/^#?allow-interfaces=.*/allow-interfaces=usb0/' /etc/avahi/avahi-daemon.conf
+grep -q '^allow-interfaces=' /etc/avahi/avahi-daemon.conf || \
+    sed -i '/^\[server\]/a allow-interfaces=usb0' /etc/avahi/avahi-daemon.conf
+sed -i -E 's/^#?publish-workstation=.*/publish-workstation=no/' /etc/avahi/avahi-daemon.conf
+sed -i -E 's/^#?publish-hinfo=.*/publish-hinfo=no/' /etc/avahi/avahi-daemon.conf
+systemctl restart avahi-daemon || true
+
+# NB perms donnees : l'app pose umask(077) au demarrage (main.c) -> config.ini
+# (mot de passe hotspot en clair), messages.db, nodes.db, gps_last.txt crees en
+# 0600. Le mot de passe hotspot fort est defini a la main par device (non scripte
+# ici pour qu'il reste unique et secret).
+
 # Optimisations du temps de demarrage (idempotent). DOIT rester en dernier :
 # desactive cloud-init pour les boots suivants une fois le provisioning fini.
 bash "$SRC/deploy/optimize-boot.sh" || true

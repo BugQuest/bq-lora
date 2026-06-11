@@ -177,6 +177,29 @@ python3 -c "open('/dev/fb_spi','wb').write(bytes([0xE0,0x07])*480*320)"
 
 ---
 
+## Sécurité & discrétion
+
+L'appareil est pensé pour être **discret sur le réseau et difficile à pirater**.
+Le durcissement est appliqué automatiquement par
+[`deploy/provision.sh`](deploy/provision.sh) (idempotent). **La RF n'est pas
+modifiée** (Meshtastic reste fonctionnel à l'identique).
+
+| Surface | Mesure | Fichier |
+|---|---|---|
+| **API Meshtastic 4403** (non authentifiée) | Pare-feu nft : accessible **uniquement** sur `lo` (UI locale) + `usb0` (tether). Bloquée sur le WiFi/hotspot → personne sur le LAN ne pilote le nœud. | [`deploy/firewall.nft`](deploy/firewall.nft), [`deploy/firewall.service`](deploy/firewall.service) |
+| **SSH** | Login root interdit, **mot de passe désactivé** (clé uniquement), pas de forwarding X11/agent. | [`deploy/sshd-hardening.conf`](deploy/sshd-hardening.conf) |
+| **mDNS / découverte** | avahi ne s'annonce que sur `usb0` (`publish-workstation=no`, `publish-hinfo=no`) → **invisible sur le WiFi domestique et le hotspot**. | `/etc/avahi/avahi-daemon.conf` |
+| **Injection shell** | Toutes les chaînes utilisateur (SSID, mots de passe, chemins, adresses BT) passées à `system()`/`popen()` sont échappées (`shq()`). | [`app/sys.c`](app/sys.c) |
+| **Fichiers de données** | `umask(077)` au démarrage → `config.ini` (mot de passe hotspot en clair), `messages.db`, `nodes.db`, `gps_last.txt`, photos créés en **`0600`**. | [`app/main.c`](app/main.c) |
+| **Hotspot WiFi** | Mot de passe fort aléatoire (WPA2), **unique par appareil** (défini à la mise en service, pas dans le dépôt). Visible sur l'écran *hotspot* de l'UI. | — |
+
+> ⚠️ **Effet de bord mDNS.** Limiter avahi à `usb0` rend l'appareil **muet en
+> mDNS sur le WiFi** : l'accès par `<hostname>.local` ne fonctionne plus qu'à
+> travers le tether USB. En WiFi, se connecter par **l'IP affichée sur l'écran
+> INFOS** (`ssh bq-lora@<ip>`). C'est le compromis assumé pour la discrétion.
+
+---
+
 ## Radio LoRa (SX1262)
 
 Le nœud Meshtastic est constitué d'un module radio **Waveshare Core1262-868M**

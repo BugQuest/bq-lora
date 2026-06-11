@@ -8,6 +8,7 @@
 #include "sys.h"
 #include "pwrbtn.h"
 #include <unistd.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -101,6 +102,11 @@ static void after_splash(void)
 
 int main(void)
 {
+    /* Securite : tout fichier cree par l'app (config.ini avec le mot de passe
+     * hotspot, messages.db, nodes.db, gps_last.txt, photos) est en 0600 -> pas
+     * de lecture par d'autres comptes locaux. (Le home est deja en 0700.) */
+    umask(077);
+
     settings_load();
 
     lv_init();

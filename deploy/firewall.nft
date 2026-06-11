@@ -1,0 +1,22 @@
+#!/usr/sbin/nft -f
+# Pare-feu minimal bq-lora-ui. Table dediee (n'interfere pas avec les tables
+# nm-shared-* gerees par NetworkManager). Politique par defaut : accept (on ne
+# bloque QUE ce qui doit l'etre), un drop dans cette table suffit a jeter le paquet.
+#
+# Objectif : l'API Meshtastic (TCP 4403) n'est PAS authentifiee -> on la reserve
+# au loopback (UI locale) et au tether USB (usb0, lien point-a-point de confiance
+# pour la prise en main par le telephone/PC). Elle est injoignable depuis le WiFi
+# domestique et le hotspot (wlan0) -> personne sur le reseau ne pilote le noeud.
+
+table inet bqlora_fw
+delete table inet bqlora_fw
+
+table inet bqlora_fw {
+    chain input {
+        type filter hook input priority -10; policy accept;
+
+        iifname "lo"   tcp dport 4403 accept
+        iifname "usb0" tcp dport 4403 accept
+        tcp dport 4403 drop
+    }
+}

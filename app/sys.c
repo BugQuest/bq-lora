@@ -21,6 +21,29 @@
 /* ---------- helpers ---------- */
 static void chomp(char *s) { size_t n = strlen(s); if (n && s[n-1] == '\n') s[n-1] = 0; }
 
+/* Echappe `src` pour une insertion SURE entre apostrophes dans une commande
+ * shell : chaque ' devient '\'' . Le resultat (a placer entre '...') ne peut
+ * plus s'echapper de la chaine quel que soit son contenu -> bloque l'injection
+ * via SSID/mot de passe WiFi/QR-code/nom BT/chemin de fichier. Tronque proprement
+ * si la place manque. Retourne `dst`. */
+static const char *shq(char *dst, size_t cap, const char *src)
+{
+    size_t k = 0;
+    if (cap == 0) return dst;
+    if (!src) src = "";
+    for (; *src; src++) {
+        if (*src == '\'') {
+            if (k + 4 >= cap) break;          /* place pour '\'' + NUL */
+            dst[k++] = '\''; dst[k++] = '\\'; dst[k++] = '\''; dst[k++] = '\'';
+        } else {
+            if (k + 1 >= cap) break;
+            dst[k++] = *src;
+        }
+    }
+    dst[k] = 0;
+    return dst;
+}
+
 static void run_get(const char *cmd, char *out, size_t cap)
 {
     out[0] = 0;
@@ -173,11 +196,13 @@ bool sys_hotspot_active(void)
 
 void sys_hotspot_set(bool on)
 {
-    char cmd[256];
-    if (on)
+    char cmd[512];
+    if (on) {
+        char es[160], ep[300];
         snprintf(cmd, sizeof(cmd), CTL " hotspot-on '%s' '%s' &",
-                 settings_hotspot_ssid(), settings_hotspot_pass());
-    else
+                 shq(es, sizeof es, settings_hotspot_ssid()),
+                 shq(ep, sizeof ep, settings_hotspot_pass()));
+    } else
         snprintf(cmd, sizeof(cmd), CTL " hotspot-off &");
     system(cmd);
 }
@@ -185,8 +210,8 @@ void sys_hotspot_set(bool on)
 void sys_set_timezone(const char *tz)
 {
     if (!tz || !*tz) return;
-    char cmd[160];
-    snprintf(cmd, sizeof(cmd), CTL " timezone '%s' &", tz);
+    char cmd[200], etz[80];
+    snprintf(cmd, sizeof(cmd), CTL " timezone '%s' &", shq(etz, sizeof etz, tz));
     system(cmd);
 }
 
@@ -273,10 +298,10 @@ static void bu_deliver(void *a) { bu_ctx_t *c = a; c->cb(c->ok, c->user); free(c
 static void *bu_thread(void *a)
 {
     bu_ctx_t *c = a;
-    char cmd[512];
+    char cmd[768], ep[512];
     snprintf(cmd, sizeof(cmd),
              "/usr/bin/python3 /home/bq-lora/bq-lora-ui/tools/badusb.py '%s' >/dev/null 2>&1",
-             c->path);
+             shq(ep, sizeof ep, c->path));
     c->ok = (system(cmd) == 0);
     lv_async_call(bu_deliver, c);
     return NULL;
@@ -544,11 +569,11 @@ static void campv_deliver(void *a)
 
 static void *campv_thread(void *a)
 {
-    campv_ctx_t *c = a; char cmd[768];
+    campv_ctx_t *c = a; char cmd[768], ej[512];
     strncpy(c->preview, CAM_PREVIEW, sizeof(c->preview) - 1);
     snprintf(cmd, sizeof(cmd),
              "/usr/bin/python3 /home/bq-lora/bq-lora-ui/tools/cam.py '%s' '%s' %d %d "
-             ">/dev/null 2>&1", c->jpg, c->preview, c->w, c->h);
+             ">/dev/null 2>&1", shq(ej, sizeof ej, c->jpg), c->preview, c->w, c->h);
     c->ok = (system(cmd) == 0);
     lv_async_call(campv_deliver, c);
     return NULL;
@@ -960,11 +985,13 @@ static void conn_deliver(void *arg)
 static void *conn_thread(void *arg)
 {
     conn_ctx_t *c = arg;
-    char cmd[512];
+    char cmd[1024], es[256], ep[512];
+    shq(es, sizeof es, c->ssid);
     if (c->pass[0])
-        snprintf(cmd, sizeof(cmd), CTL " wifi-connect '%s' '%s' 2>&1", c->ssid, c->pass);
+        snprintf(cmd, sizeof(cmd), CTL " wifi-connect '%s' '%s' 2>&1",
+                 es, shq(ep, sizeof ep, c->pass));
     else
-        snprintf(cmd, sizeof(cmd), CTL " wifi-connect '%s' '' 2>&1", c->ssid);
+        snprintf(cmd, sizeof(cmd), CTL " wifi-connect '%s' '' 2>&1", es);
     FILE *p = popen(cmd, "r");
     c->msg[0] = 0;
     if (p) {
@@ -1139,8 +1166,9 @@ static void bt_act_deliver(void *arg)
 static void *bt_act_thread(void *arg)
 {
     bt_act_ctx_t *c = arg;
-    char cmd[256];
-    snprintf(cmd, sizeof(cmd), CTL " bt-%s '%s' 2>&1", c->verb, c->addr);
+    char cmd[256], ev[32], ea[80];
+    snprintf(cmd, sizeof(cmd), CTL " bt-%s '%s' 2>&1",
+             shq(ev, sizeof ev, c->verb), shq(ea, sizeof ea, c->addr));
     FILE *p = popen(cmd, "r");
     c->msg[0] = 0;
     if (p) {

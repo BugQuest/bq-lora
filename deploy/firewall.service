@@ -1,0 +1,15 @@
+[Unit]
+Description=Pare-feu bq-lora-ui (restreint l'API Meshtastic 4403 a lo + usb0)
+After=network-pre.target
+Wants=network-pre.target
+# Recharge si NetworkManager refait ses tables (reload general).
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/nftables.d/bq-lora-ui-firewall.nft
+ExecReload=/usr/sbin/nft -f /etc/nftables.d/bq-lora-ui-firewall.nft
+
+[Install]
+WantedBy=multi-user.target
