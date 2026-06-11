@@ -51,6 +51,18 @@ static lv_obj_t *s_lk_mark;             /* marqueur derniere position connue */
 static lv_obj_t *s_nm[NODE_MARK_N];     /* marqueurs noeuds */
 static lv_obj_t *s_info_lbl;            /* zoom / etat */
 
+/* --- calque "feature 3" : echelle, cap, precision --- */
+static lv_obj_t *s_acc_circle;          /* cercle de precision (HDOP) */
+static lv_obj_t *s_head_line;           /* fleche de cap (course) */
+static lv_point_precise_t s_head_pts[2];
+static lv_obj_t *s_scale_bar;           /* barre d'echelle */
+static lv_obj_t *s_scale_lbl;           /* legende de l'echelle */
+
+/* --- fiche noeud (feature 5 : tap sur un marqueur) --- */
+static lv_obj_t *s_node_panel;          /* conteneur fiche */
+static lv_obj_t *s_node_panel_lbl;      /* texte fiche */
+static uint32_t  s_sel_num;             /* num du noeud selectionne (0 = aucun) */
+
 /* viewport (taille fixe : mise en cache pour eviter un relayout par rendu) */
 static int s_vw, s_vh;
 
@@ -94,6 +106,69 @@ static double px2lat(double px, int z) {
 
 static uint64_t tkey(int z, uint32_t x, uint32_t y) {
     return ((uint64_t)z << 56) | ((uint64_t)x << 28) | (uint64_t)y;
+}
+
+/* ---- geodesie (distance / cap vers les noeuds, echelle) ---- */
+static double deg2rad(double d) { return d * MAP_PI / 180.0; }
+
+/* distance haversine en metres */
+static double geo_dist_m(double la1, double lo1, double la2, double lo2)
+{
+    const double R = 6371000.0;
+    double dla = deg2rad(la2 - la1), dlo = deg2rad(lo2 - lo1);
+    double a = sin(dla / 2) * sin(dla / 2)
+             + cos(deg2rad(la1)) * cos(deg2rad(la2)) * sin(dlo / 2) * sin(dlo / 2);
+    return 2.0 * R * atan2(sqrt(a), sqrt(1.0 - a));
+}
+
+/* cap initial (azimut) 0..360 deg */
+static double geo_bearing(double la1, double lo1, double la2, double lo2)
+{
+    double y = sin(deg2rad(lo2 - lo1)) * cos(deg2rad(la2));
+    double x = cos(deg2rad(la1)) * sin(deg2rad(la2))
+             - sin(deg2rad(la1)) * cos(deg2rad(la2)) * cos(deg2rad(lo2 - lo1));
+    double b = atan2(y, x) * 180.0 / MAP_PI;
+    if (b < 0) b += 360.0;
+    return b;
+}
+
+/* rose des vents 8 directions (FR) */
+static const char *compass8(double brg)
+{
+    static const char *d[8] = { "N", "NE", "E", "SE", "S", "SO", "O", "NO" };
+    return d[((int)((brg + 22.5) / 45.0)) & 7];
+}
+
+/* formate une distance : "850 m" ou "1.2 km" */
+static void fmt_dist(double m, char *b, size_t n)
+{
+    if (m < 1000.0) snprintf(b, n, "%.0f m", m);
+    else            snprintf(b, n, "%.1f km", m / 1000.0);
+}
+
+/* metres par pixel a la latitude/zoom donnes (echelle, cercle de precision) */
+static double meters_per_px(double lat, int z)
+{
+    return cos(deg2rad(lat)) * 2.0 * MAP_PI * 6378137.0 / (TILE * (double)(1u << z));
+}
+
+/* position de reference : fix live si dispo, sinon derniere position connue */
+static bool ref_pos(double *la, double *lo)
+{
+    const gps_state_t *g = gps_state();
+    if (g->valid) { *la = g->lat; *lo = g->lon; return true; }
+    return gps_last_known(la, lo, NULL);
+}
+
+/* retrouve un noeud par son num (cle stable) */
+static const mesh_node_t *node_by_num(uint32_t num)
+{
+    int nn = mesh_node_count();
+    for (int i = 0; i < nn; i++) {
+        const mesh_node_t *nd = mesh_node(i);
+        if (nd && nd->num == num) return nd;
+    }
+    return NULL;
 }
 
 /* Signature de l'etat des noeuds positionnes (count + positions quantifiees).
@@ -172,6 +247,33 @@ static void place_marker(lv_obj_t *m, double lat, double lon,
                       (int)(sy) - lv_obj_get_height(m) / 2);
 }
 
+/* Remplit et affiche la fiche du noeud selectionne (nom, SNR/RSSI, vu, distance). */
+static void node_panel_update(const mesh_node_t *nd)
+{
+    if (!s_node_panel || !s_node_panel_lbl) return;
+    if (!nd) { lv_obj_add_flag(s_node_panel, LV_OBJ_FLAG_HIDDEN); return; }
+
+    char b[176];
+    int o = 0;
+    o += snprintf(b + o, sizeof(b) - o, "%s",
+                  (nd->name && nd->name[0]) ? nd->name : (nd->id ? nd->id : "?"));
+    o += snprintf(b + o, sizeof(b) - o, "\nSNR %d  RSSI %d", nd->snr, nd->rssi);
+    if (nd->batt) o += snprintf(b + o, sizeof(b) - o, "  bat %u%%", nd->batt);
+    o += snprintf(b + o, sizeof(b) - o, "\nvu %s", (nd->last && nd->last[0]) ? nd->last : "?");
+
+    double rla, rlo;
+    if (nd->has_pos && ref_pos(&rla, &rlo)) {
+        double dm = geo_dist_m(rla, rlo, nd->lat, nd->lon);
+        double br = geo_bearing(rla, rlo, nd->lat, nd->lon);
+        char db[24]; fmt_dist(dm, db, sizeof(db));
+        o += snprintf(b + o, sizeof(b) - o, "\n%s  %s", compass8(br), db);
+    } else if (!nd->has_pos) {
+        o += snprintf(b + o, sizeof(b) - o, "\n(sans position)");
+    }
+    lv_label_set_text(s_node_panel_lbl, b);
+    lv_obj_clear_flag(s_node_panel, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void map_render(void)
 {
     if (!s_map) return;
@@ -217,10 +319,43 @@ static void map_render(void)
     }
     for (; p < POOL_N; p++) { lv_obj_add_flag(s_pool[p], LV_OBJ_FLAG_HIDDEN); s_pool_key[p] = 0; }
 
-    /* marqueur GPS live (fix actuel) */
+    /* marqueur GPS live (fix actuel) + cercle de precision + fleche de cap */
     const gps_state_t *g = gps_state();
+    double gsx = lon2px(g->lon, s_zoom) - cx + W / 2.0;
+    double gsy = lat2px(g->lat, s_zoom) - cy + H / 2.0;
     if (g->valid) place_marker(s_gps_mark, g->lat, g->lon, cx, cy, W, H);
     else lv_obj_add_flag(s_gps_mark, LV_OBJ_FLAG_HIDDEN);
+
+    /* cercle de precision : rayon ~ HDOP*5 m, dessine sous le marqueur */
+    if (s_acc_circle) {
+        double mpp = meters_per_px(g->lat, s_zoom);
+        double hd  = g->hdop > 0 ? g->hdop : 1.5;
+        int rpx = mpp > 0 ? (int)(hd * 5.0 / mpp) : 0;
+        if (g->valid && rpx >= 6 && rpx <= 220 &&
+            gsx > -rpx && gsx < W + rpx && gsy > -rpx && gsy < H + rpx) {
+            lv_obj_set_size(s_acc_circle, rpx * 2, rpx * 2);
+            lv_obj_set_pos(s_acc_circle, (int)gsx - rpx, (int)gsy - rpx);
+            lv_obj_clear_flag(s_acc_circle, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_acc_circle, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    /* fleche de cap : seulement en mouvement (course fiable au-dela de ~1 km/h) */
+    if (s_head_line) {
+        if (g->valid && g->speed_kmh > 1.0) {
+            double br = deg2rad(g->course);
+            double len = 22.0;
+            s_head_pts[0].x = (lv_value_precise_t)gsx;
+            s_head_pts[0].y = (lv_value_precise_t)gsy;
+            s_head_pts[1].x = (lv_value_precise_t)(gsx + len * sin(br));
+            s_head_pts[1].y = (lv_value_precise_t)(gsy - len * cos(br));
+            lv_line_set_points(s_head_line, s_head_pts, 2);
+            lv_obj_clear_flag(s_head_line, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_head_line, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 
     /* marqueur derniere position connue (point constant : visible des qu'il n'y
      * a pas de fix live, y compris GPS coupe) */
@@ -230,20 +365,52 @@ static void map_render(void)
     else
         lv_obj_add_flag(s_lk_mark, LV_OBJ_FLAG_HIDDEN);
 
-    /* calque noeuds */
+    /* calque noeuds : pastille = id + (cap distance) vers la position de ref */
     int used = 0;
     if (s_show_nodes) {
+        double rla, rlo;
+        bool have_ref = ref_pos(&rla, &rlo);
         int nn = mesh_node_count();
         for (int i = 0; i < nn && used < NODE_MARK_N; i++) {
             const mesh_node_t *nd = mesh_node(i);
             if (!nd || !nd->has_pos || nd->self) continue;
             lv_obj_t *m = s_nm[used];
-            lv_label_set_text(m, nd->id);
+            if (have_ref) {
+                double dm = geo_dist_m(rla, rlo, nd->lat, nd->lon);
+                double br = geo_bearing(rla, rlo, nd->lat, nd->lon);
+                char db[24]; fmt_dist(dm, db, sizeof(db));
+                char t[56]; snprintf(t, sizeof(t), "%s\n%s %s",
+                                     nd->id ? nd->id : "?", compass8(br), db);
+                lv_label_set_text(m, t);
+            } else {
+                lv_label_set_text(m, nd->id ? nd->id : "?");
+            }
+            lv_obj_set_user_data(m, (void *)(uintptr_t)nd->num);
             place_marker(m, nd->lat, nd->lon, cx, cy, W, H);
             used++;
         }
     }
     for (int i = used; i < NODE_MARK_N; i++) lv_obj_add_flag(s_nm[i], LV_OBJ_FLAG_HIDDEN);
+
+    /* barre d'echelle : distance ronde tenant dans ~90 px */
+    if (s_scale_bar && s_scale_lbl) {
+        static const double nice[] = { 10, 20, 50, 100, 200, 500, 1000,
+                                       2000, 5000, 10000, 20000, 50000 };
+        double mpp = meters_per_px(s_clat, s_zoom);
+        double target = 90.0 * mpp;
+        double pick = nice[0];
+        for (size_t i = 0; i < sizeof(nice) / sizeof(nice[0]); i++)
+            if (nice[i] <= target) pick = nice[i];
+        int barpx = mpp > 0 ? (int)(pick / mpp) : 60;
+        if (barpx < 12) barpx = 12;
+        if (barpx > 150) barpx = 150;
+        lv_obj_set_width(s_scale_bar, barpx);
+        char sb[24]; fmt_dist(pick, sb, sizeof(sb));
+        lv_label_set_text(s_scale_lbl, sb);
+    }
+
+    /* fiche noeud : si un noeud est selectionne, on rafraichit ses donnees */
+    if (s_sel_num) node_panel_update(node_by_num(s_sel_num));
 
     bool conn = gps_connected();
     if (s_info_lbl) {
@@ -277,6 +444,11 @@ static void drag_cb(lv_event_t *e)
 
     if (code == LV_EVENT_PRESSED) {
         s_drag = true; s_last = pt; s_follow = false;
+        /* tap sur le fond de carte -> on ferme la fiche noeud */
+        if (s_sel_num) {
+            s_sel_num = 0;
+            if (s_node_panel) lv_obj_add_flag(s_node_panel, LV_OBJ_FLAG_HIDDEN);
+        }
     } else if (code == LV_EVENT_PRESSING && s_drag) {
         int dx = pt.x - s_last.x;
         int dy = pt.y - s_last.y;
@@ -305,6 +477,20 @@ static void follow_cb(lv_event_t *e)
     map_render();
 }
 static void nodes_cb(lv_event_t *e) { (void)e; s_show_nodes = !s_show_nodes; map_render(); }
+
+/* tap sur un marqueur noeud : recentre la carte dessus + ouvre sa fiche */
+static void node_click_cb(lv_event_t *e)
+{
+    lv_obj_t *m = lv_event_get_target(e);
+    uint32_t num = (uint32_t)(uintptr_t)lv_obj_get_user_data(m);
+    if (!num) return;
+    const mesh_node_t *nd = node_by_num(num);
+    if (!nd) return;
+    s_sel_num = num;
+    if (nd->has_pos) { s_clat = nd->lat; s_clon = nd->lon; s_follow = false; }
+    node_panel_update(nd);
+    map_render();
+}
 
 /* petit bouton rond flottant */
 static lv_obj_t *map_btn(const char *txt, lv_align_t al, int x, int y, lv_event_cb_t cb)
@@ -353,6 +539,9 @@ void ui_map_reset(void)
     s_lru = 0;
 
     s_map = NULL; s_gps_mark = NULL; s_lk_mark = NULL; s_info_lbl = NULL;
+    s_acc_circle = NULL; s_head_line = NULL;
+    s_scale_bar = NULL; s_scale_lbl = NULL;
+    s_node_panel = NULL; s_node_panel_lbl = NULL; s_sel_num = 0;
     s_drag = false;
     s_vw = s_vh = 0;
     s_rendered = false; s_last_zoom = -1;
@@ -410,9 +599,35 @@ void ui_map_build(void)
         lv_obj_set_style_radius(m, 3, 0);
         lv_obj_set_style_pad_hor(m, 3, 0);
         lv_obj_set_style_pad_ver(m, 1, 0);
+        lv_obj_set_style_text_align(m, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_add_flag(m, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(m, LV_OBJ_FLAG_CLICKABLE);   /* feature 5 : tap -> fiche */
+        lv_obj_add_event_cb(m, node_click_cb, LV_EVENT_CLICKED, NULL);
         s_nm[i] = m;
     }
+
+    /* cercle de precision (HDOP) : dessine sous le marqueur GPS */
+    lv_obj_t *acc = lv_obj_create(map);
+    lv_obj_set_size(acc, 20, 20);
+    lv_obj_set_style_radius(acc, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(acc, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_bg_opa(acc, LV_OPA_10, 0);
+    lv_obj_set_style_border_color(acc, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(acc, 1, 0);
+    lv_obj_set_style_border_opa(acc, LV_OPA_50, 0);
+    lv_obj_set_style_shadow_width(acc, 0, 0);
+    lv_obj_clear_flag(acc, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(acc, LV_OBJ_FLAG_HIDDEN);
+    s_acc_circle = acc;
+
+    /* fleche de cap (course) : ligne cyan depuis le marqueur GPS */
+    lv_obj_t *hl = lv_line_create(map);
+    lv_obj_set_pos(hl, 0, 0);
+    lv_obj_set_style_line_color(hl, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_line_width(hl, 3, 0);
+    lv_obj_set_style_line_rounded(hl, true, 0);
+    lv_obj_add_flag(hl, LV_OBJ_FLAG_HIDDEN);
+    s_head_line = hl;
 
     /* marqueur GPS (point cyan) */
     lv_obj_t *gm = lv_obj_create(map);
@@ -450,6 +665,40 @@ void ui_map_build(void)
     lv_obj_set_style_pad_ver(s_info_lbl, 1, 0);
     lv_obj_set_style_radius(s_info_lbl, 3, 0);
     lv_obj_align(s_info_lbl, LV_ALIGN_TOP_LEFT, 4, 4);
+
+    /* barre d'echelle (bas gauche) : legende + trait */
+    s_scale_lbl = label(map, "", FONT_SMALL, CY_CYAN);
+    lv_obj_set_style_bg_color(s_scale_lbl, lv_color_hex(CY_PANEL), 0);
+    lv_obj_set_style_bg_opa(s_scale_lbl, LV_OPA_70, 0);
+    lv_obj_set_style_pad_hor(s_scale_lbl, 3, 0);
+    lv_obj_set_style_radius(s_scale_lbl, 2, 0);
+    lv_obj_align(s_scale_lbl, LV_ALIGN_BOTTOM_LEFT, 4, -14);
+
+    s_scale_bar = lv_obj_create(map);
+    lv_obj_set_size(s_scale_bar, 60, 4);
+    lv_obj_set_style_bg_color(s_scale_bar, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_bg_opa(s_scale_bar, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_scale_bar, 0, 0);
+    lv_obj_set_style_radius(s_scale_bar, 0, 0);
+    lv_obj_set_style_shadow_width(s_scale_bar, 0, 0);
+    lv_obj_clear_flag(s_scale_bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(s_scale_bar, LV_ALIGN_BOTTOM_LEFT, 4, -6);
+
+    /* fiche noeud (feature 5), masquee jusqu'au tap sur un marqueur */
+    s_node_panel = lv_obj_create(map);
+    lv_obj_set_size(s_node_panel, 160, LV_SIZE_CONTENT);
+    flat(s_node_panel);
+    lv_obj_set_style_bg_color(s_node_panel, lv_color_hex(CY_PANEL), 0);
+    lv_obj_set_style_bg_opa(s_node_panel, LV_OPA_90, 0);
+    lv_obj_set_style_border_color(s_node_panel, lv_color_hex(CY_MAGENTA), 0);
+    lv_obj_set_style_border_width(s_node_panel, 1, 0);
+    lv_obj_set_style_radius(s_node_panel, 4, 0);
+    lv_obj_set_style_pad_all(s_node_panel, 5, 0);
+    lv_obj_clear_flag(s_node_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(s_node_panel, LV_ALIGN_BOTTOM_MID, 0, -6);
+    lv_obj_add_flag(s_node_panel, LV_OBJ_FLAG_HIDDEN);
+    s_node_panel_lbl = label(s_node_panel, "", FONT_SMALL, CY_TEXT);
+    lv_obj_set_width(s_node_panel_lbl, LV_PCT(100));
 
     map_render();
 }

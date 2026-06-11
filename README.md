@@ -32,6 +32,18 @@ au doigt sur l'écran, sans CLI ni application tierce.
   capture de photos en pleine résolution, et **galerie** avec **mode navigation**
   (zoom progressif jusqu'à la résolution HD native, pan tactile au doigt, viewport
   clippé) — le tout au doigt sur l'écran.
+- **GPS** — module **NEO-6M** (NMEA sur `/dev/serial0`), lecteur non bloquant
+  (`$GPGGA/$GPRMC/$GPGSV/$GPGSA`), vue debug (statut de fix, position, barres SNR
+  par satellite), **bascule on/off** persistante (libère le port + coupe les apps
+  qui s'en servent), **dernière position connue** persistée sur disque (point de
+  référence constant même sans fix), et **cadence réduite en veille** (économie).
+- **Carte offline** — carte *slippy* hors-ligne optimisée Pi Zero 2 W : tuiles
+  raster **CARTO dark** pré-converties en **RGB565** (256×256, lues direct du disque,
+  aucun décodage PNG), cache de tuiles **alloué à l'ouverture / libéré à la fermeture**
+  (0 octet gelé hors carte), rendu **uniquement sur changement** (CPU au repos sinon).
+  Suivi GPS, marqueurs des nœuds positionnés, **distance + azimut** vers chaque nœud,
+  **tap sur un nœud** → recentrage + fiche (nom, SNR/RSSI, vu, distance), **barre
+  d'échelle**, **flèche de cap** et **cercle de précision** (HDOP), pan + zoom tactile.
 - **Système** — vue **découpée en 3 sous-onglets** (SYSTÈME / RÉSEAU / RÉGLAGES)
   pour limiter le scroll sur l'écran SPI (bottleneck bande passante) : infos
   (CPU/RAM/disque/temp/alim/IP), alimentation, SSH, écran (luminosité PWM,
@@ -61,6 +73,7 @@ au doigt sur l'écran, sans CLI ni application tierce.
 | Tactile        | **XPT2046** résistif (SPI) — driver Linux `ads7846` |
 | Radio LoRa     | Waveshare **Core1262-868M** (puce **SX1262**, 868 MHz) sur SPI1 |
 | Caméra         | Module CSI **Freenove IMX219** (8 MP, 3280×2464, objectif 120°) |
+| GPS            | Module **NEO-6M / GY-GPS6MV2** (NMEA 9600 8N1 sur `/dev/serial0`) |
 | Extras         | Beeper (GPIO17), rétroéclairage BLK (GPIO18) |
 
 ### Câblage (bus matériel SPI0)
@@ -409,6 +422,10 @@ meshtastic-screen/
 │   │                          # + sys_qr_* (scanner QR libzbar) + sys_wifi_wps_async
 │   ├── settings.c / .h        # réglages persistants (nom nœud, hotspot, fuseau, mesh, langue)
 │   ├── i18n.c / i18n.h        # bilingue FR/EN : enum STR_* + tables + tr()
+│   ├── gps.c / gps.h          # lecteur GPS NMEA (NEO-6M /dev/serial0) + dernière position connue
+│   ├── ui_map.c / ui_map.h    # carte slippy offline (tuiles RGB565, marqueurs, échelle/cap/précision)
+│   ├── ui_gps.c / ui_gps.h    # vue debug GPS (fix, position, barres SNR par satellite)
+│   ├── ui_diag.c / ui_diag.h  # diagnostic RF (historique SNR/RSSI par nœud)
 │   ├── touch.c / touch.h      # pilote tactile maison (evdev + affine + lissage)
 │   └── calib.c / calib.h      # calibrage 5 points moindres carrés
 ├── config/
@@ -439,6 +456,7 @@ meshtastic-screen/
 ├── tools/                     # utilitaires Python (pas dans le binaire C)
 │   ├── splash.py              # boot splash PIL → fb0
 │   ├── cam.py                 # JPEG → buffer brut RGB565 pour le canvas (preview/galerie)
+│   ├── maptiles.py            # télécharge des tuiles CARTO → RGB565 256×256 (.bin) pour la carte
 │   ├── badusb.py              # interpréteur DuckyScript → frappes HID
 │   ├── grab.py                # capture fb0 → PNG (dev)
 │   ├── touchcal.py            # relevé tactile brut (dev)
@@ -499,6 +517,17 @@ meshtastic-screen/
 - [x] **GALERIE** : consultation des photos (canvas RGB565 via `tools/cam.py`),
       navigation précédent/suivant cyclique, suppression confirmée, **mode navigation
       zoom + pan** (preview HD 768×576, `transform_scale` LVGL + drag tactile)
+- [x] **CARTE** : carte *slippy* offline optimisée Pi Zero 2 W (tuiles CARTO dark
+      → RGB565 256×256 lues direct du disque, cache `~2 Mo` alloué à l'ouverture /
+      libéré à la fermeture, rendu seulement sur changement d'état visible) ; suivi
+      GPS, marqueurs nœuds, **distance + azimut** par nœud, **tap nœud → recentrage +
+      fiche** (nom, SNR/RSSI, vu, distance), **barre d'échelle**, **flèche de cap**,
+      **cercle de précision** (HDOP), pan + zoom tactile ; tuilage généré hors-ligne
+      par [`tools/maptiles.py`](tools/maptiles.py)
+- [x] **GPS** : vue debug du module NEO-6M (statut de fix, position, barres SNR par
+      satellite) ; lecteur NMEA non bloquant (`app/gps.c`), bascule on/off persistante,
+      dernière position connue persistée (point de référence constant), cadence
+      `gps_poll()` réduite en veille écran (économie batterie)
 - [x] **SYSTÈME** — découpée en **3 sous-onglets** (chips en tête : SYSTÈME / RÉSEAU /
       RÉGLAGES) pour rester fluide malgré le bottleneck SPI de l'ILI9486 (chaque
       sous-onglet tient quasi dans la hauteur visible) :
@@ -526,6 +555,7 @@ Fixée sur le bord **gauche** de l'écran, rafraîchie toutes les 1,5 s. De haut
 |---|---|---|
 | **USB** (`LV_SYMBOL_USB`) | Lien USB vers le PC | cyan = bail DHCP `usb0` actif **et** entrée ARP en état live (REACHABLE / PERMANENT) ; atténué sinon — pas de faux positif quand le câble est dérangé (sur Pi Zero, dwc2 n'a pas de VBUS-sense, donc on ne peut pas se fier au carrier) |
 | **WiFi** (`LV_SYMBOL_WIFI`) | État réseau WiFi | cyan = client connecté ; magenta = point d'accès (hotspot) ; atténué = aucun lien |
+| **GPS** (`LV_SYMBOL_GPS`) + n | Module GPS NEO-6M | gris `off` = désactivé ; atténué `--` = pas de lien série ; **ambre** + n = lien sans fix (n = sats en vue) ; **vert** + n = fix (n = sats utilisés) |
 | *(séparateur)* | — | sépare le groupe système du groupe LoRa |
 | **GPS** (`LV_SYMBOL_GPS`) | Liaison vers `meshtasticd` (API TCP 4403) | vert = établie et configurée ; magenta = absente |
 | **Liste** + n (`LV_SYMBOL_LIST`) | Nombre de nœuds vus sur le mesh | valeur en clair (atténuée si lien mesh coupé) |
@@ -592,12 +622,6 @@ identique au format de l'application Meshtastic officielle.
 
 ### Pistes d'évolution
 
-- [ ] **Carte locale hors-ligne** des nœuds — tuiles raster pré-converties en
-      RGB565 sur la SD (`/home/bq-lora/bq-lora-ui/map/{z}/{x}/{y}.rgb565`, schéma
-      Slippy / Leaflet), tracé des nœuds depuis leur Position protobuf (lat/lon
-      `latitude_i` / `longitude_i` × 1e-7) ; tuilage généré hors-ligne par
-      `tools/prep_map.py` à partir d'un mbtiles OSM + bbox. Réutilise le pattern
-      canvas-clippé + `transform_scale` + pan du mode navigation photo.
 - [ ] Carnet de contacts / nœuds favoris (alias, notes)
 - [ ] Réglages radio dans l'UI (région, preset, hop limit, TX power)
 - [ ] Variantes de thèmes (palettes alternatives)

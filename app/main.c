@@ -130,9 +130,14 @@ int main(void)
      * inaccessible, lignes occupees), l'UI continue sans : noop silencieux. */
     pwrbtn_init();
 
+    uint32_t last_gps = 0;
     while (1) {
         mesh_poll();
-        gps_poll();
+        /* Economie batterie : en activite on draine le port a chaque tour ;
+         * en veille on ralentit a ~1 passe / 3 s (le buffer tty du noyau
+         * absorbe le 1 Hz de NMEA entre deux vidanges, ~3 ko << 4 ko). */
+        uint32_t now = tick_cb();
+        if (!pm_asleep || now - last_gps >= 3000) { gps_poll(); last_gps = now; }
         power_save_tick();
         uint32_t idle = lv_timer_handler();
         if (idle > 20) idle = 20;
