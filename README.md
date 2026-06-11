@@ -192,6 +192,29 @@ modifiée** (Meshtastic reste fonctionnel à l'identique).
 | **Injection shell** | Toutes les chaînes utilisateur (SSID, mots de passe, chemins, adresses BT) passées à `system()`/`popen()` sont échappées (`shq()`). | [`app/sys.c`](app/sys.c) |
 | **Fichiers de données** | `umask(077)` au démarrage → `config.ini` (mot de passe hotspot en clair), `messages.db`, `nodes.db`, `gps_last.txt`, photos créés en **`0600`**. | [`app/main.c`](app/main.c) |
 | **Hotspot WiFi** | Mot de passe fort aléatoire (WPA2), **unique par appareil** (défini à la mise en service, pas dans le dépôt). Visible sur l'écran *hotspot* de l'UI. | — |
+| **Rootfs en lecture seule** *(optionnel)* | overlayroot : la racine est montée en overlay tmpfs → toute écriture va en RAM et **disparaît au reboot**. Protège la carte SD de la corruption (coupure de courant) et rend le système **immuable** (un intrus ne peut rien persister). Activable/désactivable **depuis l'UI** (onglet *Système* → SÉCURITÉ), badge **`RO`** dans la barre d'état quand actif. | [`config/config.txt.append`](config/config.txt.append), `cmdline.txt` (`overlayroot=tmpfs`) |
+| **Watchdog matériel** | `bcm2835` : `/dev/watchdog` armé par systemd (caressé en continu). Si le noyau ou systemd se fige, le Pi **se réinitialise seul** au bout d'1 min → cyberdeck increvable, pas besoin de débrancher l'alim. | [`config/config.txt.append`](config/config.txt.append) (`dtparam=watchdog=on`), [`deploy/watchdog.conf`](deploy/watchdog.conf) |
+
+> 🔒 **Rootfs immuable — mode d'emploi.** En lecture seule, *aucune* modification
+> n'est conservée après un redémarrage (messages, photos, réglages compris) :
+> n'activer ce mode qu'une fois l'appareil configuré comme voulu. Le bascule se
+> fait via l'UI et **prend effet au prochain reboot** (badge `RO` ⇒ actif). La
+> partition `/boot/firmware` reste **toujours en écriture** (FAT), donc on peut
+> toujours désactiver le mode RO depuis l'UI même quand il est actif — ou, en
+> dernier recours, retirer le jeton `overlayroot=tmpfs` de `cmdline.txt` sur la
+> carte SD depuis n'importe quel PC.
+>
+> **Mises à jour & RO.** Tant que le mode `RO` est actif, *aucune* mise à jour ne
+> persiste — ni `apt`, ni l'**OTA interne** (écran *MISE À JOUR* : `git pull` +
+> rebuild, qui irait dans le tmpfs et serait perdu au reboot, voire saturerait la
+> RAM). Pour mettre à jour : **désactiver le RO → reboot → mettre à jour →
+> réactiver le RO → reboot**. L'écran *MISE À JOUR* **refuse de se lancer** quand
+> le RO est actif (message explicite) pour éviter une maj silencieusement perdue.
+
+> ⚠️ **Watchdog — ne pas descendre sous 1 min.** Une grosse opération disque
+> (`update-initramfs`, gros `apt`) peut affamer PID 1 > 20 s sur la SD lente du
+> Pi Zero 2 W ; un timeout trop court déclenche un reset matériel **en pleine
+> mise à jour**. 1 min est la valeur éprouvée par RPi OS, conservée ici.
 
 > ⚠️ **Effet de bord mDNS.** Limiter avahi à `usb0` rend l'appareil **muet en
 > mDNS sur le WiFi** : l'accès par `<hostname>.local` ne fonctionne plus qu'à

@@ -42,6 +42,15 @@ void sys_ssh_set(bool on);
 bool sys_hotspot_active(void);
 void sys_hotspot_set(bool on);
 
+/* Rootfs en lecture seule (overlayroot/tmpfs) : rend le systeme immuable et
+ * protege la carte SD (increvable aux coupures d'alim, inviolable). La bascule
+ * s'ecrit dans /boot/firmware/cmdline.txt et ne prend effet qu'au PROCHAIN
+ * reboot. En mode RO, toute ecriture (config, DB, photos) part dans un tmpfs et
+ * est perdue au redemarrage -> mode "gele" volontaire. */
+bool sys_rootfs_ro_active(void);    /* RO effectif maintenant (root monte en overlay) */
+bool sys_rootfs_ro_pending(void);   /* configure pour le prochain boot (cmdline.txt) */
+void sys_rootfs_ro_set(bool on);    /* ecrit la conf via le helper (reboot a faire ensuite) */
+
 /* Radio WiFi (nmcli radio wifi on/off). */
 bool sys_wifi_radio_on(void);
 void sys_wifi_radio_set(bool on);

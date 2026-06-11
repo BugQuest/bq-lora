@@ -238,6 +238,27 @@ systemctl restart avahi-daemon || true
 # 0600. Le mot de passe hotspot fort est defini a la main par device (non scripte
 # ici pour qu'il reste unique et secret).
 
+# 4) Rootfs en lecture seule (overlayroot) : disponible mais NON active par
+#    defaut. L'UI bascule via le helper (token overlayroot=tmpfs dans
+#    cmdline.txt) puis reboot -> systeme immuable, carte SD increvable.
+#    auto_initramfs=1 (deja dans config.txt) fait charger l'initramfs overlayroot.
+apt-get install -y overlayroot || true
+# overlayroot doit etre pilote par cmdline.txt (FAT, writable meme en mode RO),
+# pas par /etc/overlayroot.conf (sur le rootfs fige). On laisse la conf disabled.
+if [ -f /etc/overlayroot.conf ]; then
+    sed -i -E 's/^overlayroot=.*/overlayroot=""/' /etc/overlayroot.conf || true
+fi
+update-initramfs -u || true
+
+# 5) Watchdog materiel : systemd arme /dev/watchdog (expose par dtparam=watchdog=on
+#    ajoute a config.txt) et le caresse en continu -> reset auto si le noyau/systemd
+#    se fige. Increvable sans debrancher l'alim. RPi OS l'active deja (40-rpi),
+#    on reaffirme en 99- (deterministe). Timeout 1min : plus court declenche un
+#    reset pendant update-initramfs/apt sur la SD lente du Pi Zero (teste).
+install -d /etc/systemd/system.conf.d
+install -m 644 "$SRC/deploy/watchdog.conf" /etc/systemd/system.conf.d/99-bq-lora-ui-watchdog.conf
+systemctl daemon-reexec || true
+
 # Optimisations du temps de demarrage (idempotent). DOIT rester en dernier :
 # desactive cloud-init pour les boots suivants une fois le provisioning fini.
 bash "$SRC/deploy/optimize-boot.sh" || true

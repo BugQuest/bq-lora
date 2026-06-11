@@ -207,6 +207,43 @@ void sys_hotspot_set(bool on)
     system(cmd);
 }
 
+/* ---------- rootfs lecture seule (overlayroot) ---------- */
+bool sys_rootfs_ro_active(void)
+{
+    /* Root monte en overlay = mode RO actif. Lecture directe de /proc/mounts
+     * (pas de fork) : champ 2 = point de montage, champ 3 = type de fs. */
+    FILE *f = fopen("/proc/mounts", "r");
+    if (!f) return false;
+    char dev[256], mnt[256], fst[64];
+    bool ro = false;
+    while (fscanf(f, "%255s %255s %63s %*[^\n]", dev, mnt, fst) == 3) {
+        if (strcmp(mnt, "/") == 0) { ro = (strcmp(fst, "overlay") == 0); break; }
+    }
+    fclose(f);
+    return ro;
+}
+
+bool sys_rootfs_ro_pending(void)
+{
+    /* Etat configure pour le prochain boot : presence du token dans cmdline.txt
+     * (sur la partition FAT /boot, toujours accessible meme en mode RO). */
+    FILE *f = fopen("/boot/firmware/cmdline.txt", "r");
+    if (!f) return false;
+    char line[1024]; bool on = false;
+    if (fgets(line, sizeof(line), f)) on = (strstr(line, "overlayroot=tmpfs") != NULL);
+    fclose(f);
+    return on;
+}
+
+void sys_rootfs_ro_set(bool on)
+{
+    /* Ecrit la conf (synchrone : le helper edite cmdline.txt en <1ms). Le reboot
+     * qui applique la bascule est declenche separement par l'appelant. */
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), CTL " %s", on ? "ro-enable" : "ro-disable");
+    system(cmd);
+}
+
 void sys_set_timezone(const char *tz)
 {
     if (!tz || !*tz) return;

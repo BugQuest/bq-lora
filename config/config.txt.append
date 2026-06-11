@@ -46,3 +46,10 @@ dtparam=i2c_arm=on
 #   - retirer "console=serial0,115200" du cmdline.txt (optimize-boot.sh le fait deja)
 enable_uart=1
 dtoverlay=miniuart-bt
+
+# === Watchdog materiel (bcm2835) ===
+# Expose /dev/watchdog : systemd l'arme (RuntimeWatchdogSec, cf. le drop-in
+# 10-bq-lora-ui-watchdog.conf) et le caresse en continu. Si le noyau ou systemd
+# se fige (deadlock, crash, panic), le watchdog materiel reset le Pi tout seul
+# au bout du timeout -> cyberdeck increvable, pas besoin de debrancher l'alim.
+dtparam=watchdog=on

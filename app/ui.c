@@ -93,6 +93,7 @@ static lv_obj_t *sb_warn_thr_cell, *sb_warn_thr_ic;
 static lv_obj_t *sb_warn_temp_cell, *sb_warn_temp_ic, *sb_warn_temp_val;
 static lv_obj_t *sb_warn_disk_cell, *sb_warn_disk_ic, *sb_warn_disk_val;
 static lv_obj_t *sb_warn_usbmode_cell, *sb_warn_usbmode_ic;
+static lv_obj_t *sb_ro_cell, *sb_ro_ic;     /* rappel rootfs en lecture seule (immuable) */
 static lv_timer_t *tb_timer;
 
 /* Badge non-lus sur la carte MESSAGES du hub. msg_seen = compteur "lu" (remis
@@ -306,6 +307,14 @@ static void statusbar_refresh(lv_timer_t *t) {
             lv_obj_add_flag(sb_warn_usbmode_cell, LV_OBJ_FLAG_HIDDEN);
         }
     }
+
+    /* rappel rootfs lecture seule : visible des que le mode immuable est actif */
+    if (sb_ro_cell) {
+        if (sys_rootfs_ro_active())
+            lv_obj_clear_flag(sb_ro_cell, LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_add_flag(sb_ro_cell, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void build_topbar(lv_obj_t *parent) {
@@ -421,6 +430,12 @@ static void build_statusbar(lv_obj_t *parent) {
     sb_warn_usbmode_ic   = sb_item(sb, LV_SYMBOL_KEYBOARD, NULL, CY_MAGENTA, NULL);
     sb_warn_usbmode_cell = lv_obj_get_parent(sb_warn_usbmode_ic);
     lv_obj_add_flag(sb_warn_usbmode_cell, LV_OBJ_FLAG_HIDDEN);
+
+    /* Rappel rootfs lecture seule (immuable) : pas une alerte mais un etat
+     * persistant a garder en tete -> badge "RO" vert, cache quand inactif. */
+    sb_ro_ic   = sb_item(sb, "RO", NULL, CY_GREEN, NULL);
+    sb_ro_cell = lv_obj_get_parent(sb_ro_ic);
+    lv_obj_add_flag(sb_ro_cell, LV_OBJ_FLAG_HIDDEN);
 }
 
 
@@ -446,6 +461,7 @@ static void mesh_refresh_cb(lv_timer_t *t) {
 static lv_obj_t *sys_lbl_host, *sys_lbl_ipw, *sys_lbl_ipu, *sys_lbl_uptime;
 static lv_obj_t *sys_lbl_cpu, *sys_lbl_mem, *sys_lbl_disk, *sys_lbl_thr, *sys_lbl_kernel;
 static lv_obj_t *sys_lbl_ssh_state, *sys_lbl_ssh_btn, *sys_btn_ssh;
+static lv_obj_t *sys_lbl_ro_state, *sys_lbl_ro_btn, *sys_btn_ro;
 static lv_obj_t *sys_lbl_wifi;
 static lv_obj_t *sys_lbl_hot_state, *sys_lbl_hot_btn;
 static lv_obj_t *sys_lbl_usb_state, *sys_lbl_usb_ip;
@@ -529,6 +545,16 @@ static void lang_toggle_cb(lv_event_t *e) {
 static void calib_cb(lv_event_t *e)    { (void)e; calib_start(NULL); }
 static void ssh_toggle_cb(lv_event_t *e) { (void)e; sys_ssh_set(!sys_ssh_running()); }
 
+/* Rootfs lecture seule : on bascule l'etat *configure* (cmdline.txt) puis on
+ * redemarre pour l'appliquer. confirm_dialog rappelle ro_apply sur "oui". */
+static bool ro_target;
+static void ro_apply(void) { sys_rootfs_ro_set(ro_target); sys_reboot(); }
+static void ro_toggle_cb(lv_event_t *e) {
+    (void)e;
+    ro_target = !sys_rootfs_ro_pending();
+    confirm_dialog(ro_target ? tr(STR_CONFIRM_RO_ON) : tr(STR_CONFIRM_RO_OFF), ro_apply);
+}
+
 static void wifi_radio_yes(void) { sys_wifi_radio_set(!sys_wifi_radio_on()); }
 static void wifi_radio_toggle_cb(lv_event_t *e) {
     (void)e;
@@ -573,6 +599,7 @@ static void upd_check_done_cb(bool avail, const char *loc, const char *rem, void
 }
 static void upd_check_cb(lv_event_t *e) {
     (void)e;
+    if (sys_rootfs_ro_active()) { ui_dialog_error(tr(STR_UPDATE_RO_BLOCKED)); return; }
     if (upd_lbl_state) {
         lv_label_set_text(upd_lbl_state, tr(STR_UPDATE_CHECKING));
         lv_obj_set_style_text_color(upd_lbl_state, lv_color_hex(CY_CYAN), 0);
@@ -653,6 +680,7 @@ static void upd_apply_yes(void) {
 }
 static void upd_apply_cb(lv_event_t *e) {
     (void)e;
+    if (sys_rootfs_ro_active()) { ui_dialog_error(tr(STR_UPDATE_RO_BLOCKED)); return; }
     confirm_dialog(tr(STR_CONFIRM_UPDATE), upd_apply_yes);
 }
 
@@ -743,6 +771,19 @@ static void sys_refresh(lv_timer_t *t) {
             lv_label_set_text(sys_lbl_ssh_btn, running ? tr(STR_BTN_DISABLE) : tr(STR_BTN_ENABLE));
     }
 
+    if (sys_lbl_ro_state) {
+        bool ro_act = sys_rootfs_ro_active();
+        bool ro_pend = sys_rootfs_ro_pending();
+        const char *txt; uint32_t col;
+        if (ro_pend != ro_act)  { txt = tr(STR_RO_REBOOT_PENDING); col = CY_AMBER; }
+        else if (ro_act)        { txt = tr(STR_RO_ACTIVE);         col = CY_GREEN; }
+        else                    { txt = tr(STR_RO_INACTIVE);       col = CY_DIM;   }
+        lv_label_set_text(sys_lbl_ro_state, txt);
+        lv_obj_set_style_text_color(sys_lbl_ro_state, lv_color_hex(col), 0);
+        if (sys_lbl_ro_btn)
+            lv_label_set_text(sys_lbl_ro_btn, ro_pend ? tr(STR_BTN_DISABLE) : tr(STR_BTN_ENABLE));
+    }
+
     if (sys_lbl_wifi) {
         if (i.wifi_signal >= 0)
             snprintf(b, sizeof(b), "%s  (%d%%)", i.wifi_ssid, i.wifi_signal);
@@ -814,6 +855,7 @@ static void sys_null_widgets(void) {
     sys_lbl_uptime = NULL; sys_lbl_cpu = NULL; sys_lbl_mem = NULL;
     sys_lbl_disk = NULL; sys_lbl_thr = NULL; sys_lbl_kernel = NULL;
     sys_lbl_ssh_state = NULL; sys_lbl_ssh_btn = NULL; sys_btn_ssh = NULL;
+    sys_lbl_ro_state = NULL; sys_lbl_ro_btn = NULL; sys_btn_ro = NULL;
     sys_lbl_bt_state = NULL; sys_lbl_bt_btn = NULL;
     sys_lbl_usb_state = NULL; sys_lbl_usb_ip = NULL;
     sys_btn_usb_share = NULL; sys_btn_usb_client = NULL;
@@ -950,6 +992,32 @@ static void sys_build_network_tab(lv_obj_t *col)
     lv_obj_clear_flag(unrow, LV_OBJ_FLAG_SCROLLABLE);
     sys_btn_usb_share  = small_button(unrow, tr(STR_BTN_NET_SHARE),  CY_CYAN,  usb_net_share_cb);
     sys_btn_usb_client = small_button(unrow, tr(STR_BTN_NET_CLIENT), CY_AMBER, usb_net_client_cb);
+
+    /* SECURITE : rootfs en lecture seule (systeme immuable) */
+    s = section(col, tr(STR_SEC_SECURITY));
+    label(s, tr(STR_RO_TITLE), FONT_BODY, CY_TEXT);
+    lv_obj_t *rr = lv_obj_create(s);
+    lv_obj_set_size(rr, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(rr); lv_obj_set_flex_flow(rr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(rr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(rr, LV_OBJ_FLAG_SCROLLABLE);
+    sys_lbl_ro_state = label(rr, "?", FONT_BODY, CY_DIM);
+    sys_btn_ro = lv_button_create(rr);
+    lv_obj_set_size(sys_btn_ro, 130, 30);
+    lv_obj_set_style_radius(sys_btn_ro, 2, 0);
+    lv_obj_set_style_bg_opa(sys_btn_ro, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(sys_btn_ro, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_border_width(sys_btn_ro, 1, 0);
+    lv_obj_set_style_border_color(sys_btn_ro, lv_color_hex(CY_CYAN), 0);
+    lv_obj_set_style_shadow_width(sys_btn_ro, 0, 0);
+    lv_obj_add_event_cb(sys_btn_ro, ro_toggle_cb, LV_EVENT_CLICKED, NULL);
+    sys_lbl_ro_btn = label(sys_btn_ro, "?", FONT_SMALL, CY_TEXT);
+    lv_obj_center(sys_lbl_ro_btn);
+    {
+        lv_obj_t *hint = label(s, tr(STR_RO_HINT), FONT_SMALL, CY_DIM);
+        lv_obj_set_width(hint, LV_PCT(100));
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    }
 }
 
 static void sys_build_settings_tab(lv_obj_t *col)

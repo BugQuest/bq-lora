@@ -104,11 +104,22 @@ static const char *FR[STR_COUNT] = {
     [STR_UPDATE_REBOOT_HINT] = "le Pi va redemarrer a la fin",
     [STR_UPDATE_CHECKING] = "verification...",
     [STR_UPDATE_FAILED] = "Echec de la mise a jour.\nVerifiez la connexion internet\n(voir /var/log/bq-lora-ui-update.log).",
+    [STR_UPDATE_RO_BLOCKED] = "Rootfs en lecture seule.\nDesactivez-le (Systeme -> SECURITE)\net redemarrez avant de mettre a jour,\nsinon la maj ne serait pas conservee.",
     [STR_CONFIRM_KBD_FIRST] = "Active d'abord le mode CLAVIER",
     [STR_INVALID_NODE_NAME] = "Nom de noeud invalide.\n1 a 39 caracteres, sans espaces\nen debut/fin.",
     [STR_NAME_SAVED_LOCAL] = "Nom enregistre localement.\nMESH inactif : le nom radio\nsera pousse a la reconnexion.",
     [STR_SETTINGS_TITLE] = "Reglages",
     [STR_SETTINGS_DETAILS] = "noeud, SSID hotspot, passphrase, fuseau",
+
+    /* Securite : rootfs lecture seule */
+    [STR_SEC_SECURITY] = "SECURITE",
+    [STR_RO_TITLE] = "Rootfs lecture seule",
+    [STR_RO_HINT] = "Systeme immuable : protege la carte SD (increvable aux coupures). En mode RO, aucune modif (config, messages, photos) n'est conservee apres reboot.",
+    [STR_RO_ACTIVE] = "ACTIF (immuable)",
+    [STR_RO_INACTIVE] = "Inactif (lecture/ecriture)",
+    [STR_RO_REBOOT_PENDING] = "redemarrage requis",
+    [STR_CONFIRM_RO_ON] = "Activer le rootfs en lecture seule ?\nNecessite un redemarrage. En mode RO, plus aucune donnee n'est sauvegardee (config, messages, photos perdus au reboot).",
+    [STR_CONFIRM_RO_OFF] = "Desactiver le rootfs en lecture seule ?\nNecessite un redemarrage. Le systeme redeviendra modifiable.",
 
     /* WiFi */
     [STR_WIFI_SCANNING] = "scan en cours...",
@@ -316,11 +327,22 @@ static const char *EN[STR_COUNT] = {
     [STR_UPDATE_REBOOT_HINT] = "the Pi will reboot at the end",
     [STR_UPDATE_CHECKING] = "checking...",
     [STR_UPDATE_FAILED] = "Update failed.\nCheck your internet connection\n(see /var/log/bq-lora-ui-update.log).",
+    [STR_UPDATE_RO_BLOCKED] = "Read-only rootfs.\nDisable it (System -> SECURITY)\nand reboot before updating,\notherwise the update won't persist.",
     [STR_CONFIRM_KBD_FIRST] = "Enable KEYBOARD mode first",
     [STR_INVALID_NODE_NAME] = "Invalid node name.\n1 to 39 characters, no leading\nor trailing spaces.",
     [STR_NAME_SAVED_LOCAL] = "Name saved locally.\nMESH disabled: the radio name\nwill be pushed on reconnect.",
     [STR_SETTINGS_TITLE] = "Settings",
     [STR_SETTINGS_DETAILS] = "node, hotspot SSID, passphrase, timezone",
+
+    /* Security: read-only rootfs */
+    [STR_SEC_SECURITY] = "SECURITY",
+    [STR_RO_TITLE] = "Read-only rootfs",
+    [STR_RO_HINT] = "Immutable system: protects the SD card (survives power loss). In RO mode, no change (config, messages, photos) survives a reboot.",
+    [STR_RO_ACTIVE] = "ON (immutable)",
+    [STR_RO_INACTIVE] = "Off (read/write)",
+    [STR_RO_REBOOT_PENDING] = "reboot required",
+    [STR_CONFIRM_RO_ON] = "Enable read-only rootfs?\nRequires a reboot. In RO mode nothing is saved (config, messages, photos lost on reboot).",
+    [STR_CONFIRM_RO_OFF] = "Disable read-only rootfs?\nRequires a reboot. The system will become writable again.",
 
     /* WiFi */
     [STR_WIFI_SCANNING] = "scanning...",

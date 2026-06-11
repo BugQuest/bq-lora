@@ -170,8 +170,34 @@ EOF
         # cree une connexion. Echec si le timeout WPS (~120s) expire.
         exec /usr/sbin/wpa_cli -i wlan0 wps_pbc
         ;;
+    ro-enable|ro-disable)
+        # Rootfs en lecture seule via overlayroot : on pilote par le token
+        # 'overlayroot=tmpfs' dans cmdline.txt (partition FAT /boot, toujours
+        # writable, meme quand le rootfs est deja en overlay -> bascule
+        # reversible dans les deux sens). Effet au prochain reboot.
+        CMDLINE=/boot/firmware/cmdline.txt
+        [ -f "$CMDLINE" ] || { echo "cmdline.txt introuvable" >&2; exit 1; }
+        # cmdline.txt DOIT rester sur une seule ligne : on retire d'abord tout
+        # token overlayroot= existant, puis on (re)ajoute si ro-enable.
+        line=$(sed -E 's/[[:space:]]*overlayroot=[^[:space:]]*//g' "$CMDLINE" | tr -d '\n')
+        if [ "$1" = "ro-enable" ]; then
+            printf '%s overlayroot=tmpfs:recurse=0\n' "$line" > "$CMDLINE"
+        else
+            printf '%s\n' "$line" > "$CMDLINE"
+        fi
+        ;;
+    ro-status)
+        # active = root monte en overlay ; pending = configure dans cmdline.txt
+        if [ "$(findmnt -rno FSTYPE / 2>/dev/null)" = "overlay" ]; then
+            echo "active"
+        else
+            echo "inactive"
+        fi
+        grep -q 'overlayroot=tmpfs' /boot/firmware/cmdline.txt 2>/dev/null \
+            && echo "pending=on" || echo "pending=off"
+        ;;
     *)
-        echo "usage: $0 {reboot|poweroff|ssh-on|ssh-off|wifi-scan|wifi-connect SSID [PASS]|wifi-wps|bt-scan|bt-pair MAC|bt-connect MAC|bt-remove MAC|bt-serial-on|bt-serial-off}" >&2
+        echo "usage: $0 {reboot|poweroff|ssh-on|ssh-off|wifi-scan|wifi-connect SSID [PASS]|wifi-wps|bt-scan|bt-pair MAC|bt-connect MAC|bt-remove MAC|bt-serial-on|bt-serial-off|ro-enable|ro-disable|ro-status}" >&2
         exit 2
         ;;
 esac
