@@ -30,6 +30,12 @@ static double       s_lk_lat, s_lk_lon;
 static uint32_t     s_lk_epoch;       /* 0 = aucune position connue */
 static time_t       s_lk_saved;       /* derniere ecriture disque */
 
+/* lissage anti-jitter : filtre exponentiel sur la position, gere par fix (~1 Hz).
+ * Le coefficient depend de la vitesse -> fort lissage a l'arret, suivi en mouvement. */
+static double       s_flt_lat, s_flt_lon;
+static bool         s_flt_init;
+static uint32_t     s_flt_fix;        /* dernier last_fix deja lisse */
+
 static void lk_load(void)
 {
     FILE *f = fopen(LK_PATH, "r");
@@ -56,9 +62,49 @@ static gps_sat_t    s_gsv[GPS_MAX_SATS];
 static int          s_gsv_n;
 static int          s_gsv_total_msg;
 
+/* ---- configuration binaire u-blox (UBX) ---- */
+/* Construit une trame UBX (B5 62 cls id len payload ck_a ck_b, checksum Fletcher
+ * sur cls..payload) et l'envoie. Best-effort : le module ignore une trame
+ * tronquee, et on rejoue la config a chaque ouverture du port. */
+static void ubx_send(uint8_t cls, uint8_t id, const uint8_t *payload, uint16_t len)
+{
+    if (s_fd < 0) return;
+    uint8_t hdr[6] = { 0xB5, 0x62, cls, id, (uint8_t)(len & 0xFF), (uint8_t)(len >> 8) };
+    uint8_t a = 0, b = 0;
+    for (int i = 2; i < 6; i++) { a += hdr[i]; b += a; }
+    for (uint16_t i = 0; i < len; i++) { a += payload[i]; b += a; }
+    uint8_t ck[2] = { a, b };
+    ssize_t w;
+    w = write(s_fd, hdr, 6);            (void)w;
+    if (len) { w = write(s_fd, payload, len); (void)w; }
+    w = write(s_fd, ck, 2);            (void)w;
+    tcdrain(s_fd);                      /* laisse partir la trame avant la suivante */
+}
+
+/* Modele "pieton" + Static Hold (anti-jitter materiel) + SBAS/EGNOS (corrections
+ * differentielles). Applique en RAM du module ; rejoue a chaque gps_open() pour
+ * ne pas dependre de la sauvegarde flash (pile de sauvegarde absente/faible). */
+static void ubx_configure(void)
+{
+    /* CFG-NAV5 (0x06 0x24, 36 o) : dynModel=3 (pieton) + static hold 0.8 m/s.
+     * Le static hold fige activement la position sous le seuil de vitesse. */
+    uint8_t nav5[36] = {0};
+    nav5[0]  = 0x41; nav5[1] = 0x00;   /* mask : dyn (0x01) + staticHold (0x40) */
+    nav5[2]  = 3;                      /* dynModel : 3 = pedestrian */
+    nav5[3]  = 3;                      /* fixMode  : 3 = auto 2D/3D */
+    nav5[12] = 5;                      /* minElev  : 5 deg */
+    nav5[22] = 80;                     /* staticHoldThresh : 80 cm/s (0.8 m/s) */
+    ubx_send(0x06, 0x24, nav5, 36);
+
+    /* CFG-SBAS (0x06 0x16, 8 o) : SBAS active (EGNOS en EU), range + diffCorr. */
+    uint8_t sbas[8] = { 0x01, 0x03, 3, 0, 0, 0, 0, 0 };
+    ubx_send(0x06, 0x16, sbas, 8);
+}
+
 static void gps_open(void)
 {
-    s_fd = open(GPS_DEV, O_RDONLY | O_NOCTTY | O_NONBLOCK);
+    /* O_RDWR : on doit pouvoir ECRIRE la config UBX (Pi TX -> GPS RX cable). */
+    s_fd = open(GPS_DEV, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (s_fd < 0) return;
 
     struct termios tio;
@@ -72,6 +118,7 @@ static void gps_open(void)
         tio.c_cc[VTIME] = 0;
         tcsetattr(s_fd, TCSANOW, &tio);
     }
+    ubx_configure();      /* anti-jitter materiel + SBAS */
     s_st.present = true;
 }
 
@@ -253,6 +300,30 @@ void gps_poll(void)
     }
     if (any) s_st.last_rx = (uint32_t)time(NULL);
 
+    /* Lissage anti-jitter : a chaque NOUVEAU fix (last_fix change, soit ~1 Hz),
+     * on melange la position brute avec la position filtree. Le coefficient
+     * depend de la vitesse :
+     *   - a l'arret  (< 1.5 km/h) : a=0.12 -> le point se fige (le bruit GPS
+     *     a l'arret tourne autour de la vraie position, la moyenne converge) ;
+     *   - lent       (< 5 km/h)   : a=0.40 -> compromis ;
+     *   - clairement en mouvement : a=1.00 -> position brute, pleine reactivite.
+     * Si HDOP est mauvais (>4), on lisse davantage (fix peu fiable). */
+    if (s_st.valid && s_st.last_fix != s_flt_fix) {
+        s_flt_fix = s_st.last_fix;
+        double rla = s_st.lat, rlo = s_st.lon;
+        if (!s_flt_init) {
+            s_flt_lat = rla; s_flt_lon = rlo; s_flt_init = true;
+        } else {
+            double a = s_st.speed_kmh > 5.0f ? 1.00
+                     : s_st.speed_kmh > 1.5f ? 0.40
+                     :                         0.12;
+            if (s_st.hdop > 4.0f && a > 0.20) a = 0.20;   /* fix douteux -> on lisse */
+            s_flt_lat += a * (rla - s_flt_lat);
+            s_flt_lon += a * (rlo - s_flt_lon);
+        }
+        s_st.lat = s_flt_lat; s_st.lon = s_flt_lon;
+    }
+
     /* memorise la derniere position connue (point constant carte) */
     if (s_st.valid) {
         s_lk_lat = s_st.lat; s_lk_lon = s_st.lon;
@@ -260,8 +331,11 @@ void gps_poll(void)
         if (time(NULL) - s_lk_saved >= LK_SAVE_S) lk_save();
     }
 
-    /* perte de fix : si plus de trame valide depuis >5 s, on invalide. */
-    if (s_st.valid && time(NULL) - (time_t)s_st.last_fix > 5) s_st.valid = false;
+    /* perte de fix : si plus de trame valide depuis >5 s, on invalide et on
+     * reinitialise le filtre (le prochain fix repart de la mesure brute). */
+    if (s_st.valid && time(NULL) - (time_t)s_st.last_fix > 5) {
+        s_st.valid = false; s_flt_init = false;
+    }
 }
 
 const gps_state_t *gps_state(void) { return &s_st; }
@@ -283,6 +357,7 @@ void gps_set_enabled(bool en)
         if (s_fd >= 0) { close(s_fd); s_fd = -1; }
         s_len = 0;
         s_gsv_n = 0; s_gsv_total_msg = 0;
+        s_flt_init = false;
         memset(&s_st, 0, sizeof(s_st));
     } else {
         /* reouverture immediate au prochain poll */

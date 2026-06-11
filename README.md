@@ -37,6 +37,11 @@ au doigt sur l'écran, sans CLI ni application tierce.
   par satellite), **bascule on/off** persistante (libère le port + coupe les apps
   qui s'en servent), **dernière position connue** persistée sur disque (point de
   référence constant même sans fix), et **cadence réduite en veille** (économie).
+  **Précision** : le module est configuré en **UBX** à l'ouverture du port —
+  modèle dynamique *piéton* + **Static Hold** (gel actif de la position à l'arrêt,
+  anti-jitter) et **SBAS / EGNOS** (corrections différentielles) ; en complément, un
+  **filtre exponentiel adaptatif** côté logiciel lisse la position (fort à l'arrêt,
+  transparent en mouvement, renforcé si HDOP dégradé).
 - **Carte offline** — carte *slippy* hors-ligne optimisée Pi Zero 2 W : tuiles
   raster **CARTO dark** pré-converties en **RGB565** (256×256, lues direct du disque,
   aucun décodage PNG), cache de tuiles **alloué à l'ouverture / libéré à la fermeture**
@@ -527,7 +532,10 @@ meshtastic-screen/
 - [x] **GPS** : vue debug du module NEO-6M (statut de fix, position, barres SNR par
       satellite) ; lecteur NMEA non bloquant (`app/gps.c`), bascule on/off persistante,
       dernière position connue persistée (point de référence constant), cadence
-      `gps_poll()` réduite en veille écran (économie batterie)
+      `gps_poll()` réduite en veille écran (économie batterie) ; **précision** :
+      configuration UBX du module à l'ouverture (CFG-NAV5 modèle *piéton* + Static
+      Hold, CFG-SBAS EGNOS, port en `O_RDWR` — Pi TX → GPS RX requis) + filtre
+      exponentiel adaptatif logiciel (anti-jitter à l'arrêt)
 - [x] **SYSTÈME** — découpée en **3 sous-onglets** (chips en tête : SYSTÈME / RÉSEAU /
       RÉGLAGES) pour rester fluide malgré le bottleneck SPI de l'ILI9486 (chaque
       sous-onglet tient quasi dans la hauteur visible) :
