@@ -114,27 +114,46 @@ void ui_gps_build(void)
 {
     ui_gps_reset();
 
-    /* En-tete : statut + compteurs. */
+    /* En-tete : 3 lignes empilees en flex (pas de chevauchement quel que soit
+     * le contenu). Chaque ligne gauche/droite est un sous-conteneur flex-row. */
     lv_obj_t *hdr = lv_obj_create(content);
     lv_obj_set_size(hdr, LV_PCT(100), LV_SIZE_CONTENT);
     flat(hdr);
     lv_obj_set_style_pad_all(hdr, 8, 0);
+    lv_obj_set_style_pad_row(hdr, 6, 0);
+    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
 
-    g_status_lbl = label(hdr, "NO LINK", &lv_font_montserrat_16, CY_DIM);
-    lv_obj_align(g_status_lbl, LV_ALIGN_TOP_LEFT, 0, 0);
+    /* ligne 1 : statut (gauche) | sats + HDOP (droite) */
+    lv_obj_t *r1 = lv_obj_create(hdr);
+    lv_obj_set_size(r1, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(r1);
+    lv_obj_set_style_pad_all(r1, 0, 0);
+    lv_obj_clear_flag(r1, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(r1, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(r1, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    g_sat_lbl = label(hdr, "", FONT_SMALL, CY_TEXT);
-    lv_obj_align(g_sat_lbl, LV_ALIGN_TOP_RIGHT, 0, 2);
+    g_status_lbl = label(r1, "NO LINK", &lv_font_montserrat_16, CY_DIM);
+    g_sat_lbl = label(r1, "", FONT_SMALL, CY_TEXT);
+    lv_obj_set_style_text_align(g_sat_lbl, LV_TEXT_ALIGN_RIGHT, 0);
 
-    g_pos_lbl = label(hdr, "", FONT_BODY, CY_TEXT);
-    lv_obj_align(g_pos_lbl, LV_ALIGN_TOP_LEFT, 0, 26);
+    /* ligne 2 : position (gauche, 3 lignes) | cinematique (droite) */
+    lv_obj_t *r2 = lv_obj_create(hdr);
+    lv_obj_set_size(r2, LV_PCT(100), LV_SIZE_CONTENT);
+    flat(r2);
+    lv_obj_set_style_pad_all(r2, 0, 0);
+    lv_obj_clear_flag(r2, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(r2, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(r2, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
-    g_kin_lbl = label(hdr, "", FONT_SMALL, CY_DIM);
-    lv_obj_align(g_kin_lbl, LV_ALIGN_TOP_RIGHT, 0, 30);
+    g_pos_lbl = label(r2, "", FONT_BODY, CY_TEXT);
+    g_kin_lbl = label(r2, "", FONT_SMALL, CY_DIM);
+    lv_obj_set_style_text_align(g_kin_lbl, LV_TEXT_ALIGN_RIGHT, 0);
 
+    /* ligne 3 : device + acquittements UBX (pleine largeur, 2 lignes) */
     g_dev_lbl = label(hdr, "", FONT_SMALL, CY_DIM);
-    lv_obj_align(g_dev_lbl, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
     /* Liste des satellites (PRN | barre SNR | dB). */
     lv_obj_t *list = lv_obj_create(content);
