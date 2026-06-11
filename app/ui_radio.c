@@ -13,6 +13,12 @@
 #define RADIO_PRESETS_PATH  "/home/bq-lora/bq-lora-ui/radio_presets.tsv"
 #define MAX_PRESETS         16
 #define MESHTASTIC_CLI      "/home/bq-lora/.local/bin/meshtastic"
+/* Helper canaux : remplace TOTALEMENT les canaux (supprime les secondaires
+ * residuels que `--seturl` laisse trainer) puis pousse le ChannelSet+LoRaConfig
+ * de l'URL. Lance avec le python du venv meshtastic (le module n'est pas dans le
+ * python systeme). Voir tools/apply_channels.py pour le detail de la methode. */
+#define MESH_VENV_PY        "/home/bq-lora/.local/share/pipx/venvs/meshtastic/bin/python"
+#define APPLY_CHANS_PY      "/home/bq-lora/bq-lora-ui/tools/apply_channels.py"
 
 /* Tables de choix : indice -> chaine pour CLI / affichage UI. */
 static const char *kRegions[] = {
@@ -44,6 +50,17 @@ typedef struct {
     "https://meshtastic.org/e/#ChYSAQEaCUZyX0JhbGlzZSgBMAE6AgggChUSAQEaCEZy" \
     "X0VNQ09NKAEwAToCCCAKFhIBARoJRnJfQmxhQmxhKAEwAToCCCASFggBEAc4A0ADSAFQG2gBdZpdWUTIBgE"
 
+/* Canaux PUBLICS par defaut, un par preset : canal primaire UNIQUE a nom vide
+ * (-> slot de frequence public standard pour ce preset) + cle publique (AQ==).
+ * Chaque URL embarque sa propre LoRaConfig (region EU_868, preset, hop, tx).
+ * Sans ces URLs, charger un preset "public" laissait les canaux precedents
+ * (ex : Fr_Balise de Gaulix) en place -> on n'entendait pas le mesh public.
+ * Generes via meshtastic.protobuf.ChannelSet (cf. historique). */
+#define LONGFAST_CHANS_URL  "https://meshtastic.org/e/#CgsSAQEoATABOgIIIBIPCAE4A0ADSAFQG2gByAYB"
+#define MEDIUMFAST_CHANS_URL "https://meshtastic.org/e/#CgsSAQEoATABOgIIIBIRCAEQBDgDQANIAVAbaAHIBgE"
+#define SHORTFAST_CHANS_URL "https://meshtastic.org/e/#CgsSAQEoATABOgIIIBIRCAEQBjgDQAFIAVAKaAHIBgE"
+#define LONGSLOW_CHANS_URL  "https://meshtastic.org/e/#CgsSAQEoATABOgIIIBIRCAEQATgDQAVIAVAbaAHIBgE"
+
 static radio_preset_t s_presets[MAX_PRESETS];
 static int            s_preset_count;
 
@@ -54,13 +71,14 @@ static const radio_preset_t kDefaultPresets[] = {
       "Reseau Gaulix France : portee+, freq 869.4625 separee du LongFast public",
       GAULIX_CHANS_URL },
     { "LongFast public",  "EU_868", "LONG_FAST",     3, 27,   0.0f,
-      "Defaut mondial Meshtastic : equilibre debit/portee, 869.525 MHz", "" },
+      "Defaut mondial Meshtastic : equilibre debit/portee, 869.525 MHz",
+      LONGFAST_CHANS_URL },
     { "MediumFast",       "EU_868", "MEDIUM_FAST",   3, 27,   0.0f,
-      "Plus de debit, portee reduite (~2x latence/2)", "" },
+      "Plus de debit, portee reduite (~2x latence/2)", MEDIUMFAST_CHANS_URL },
     { "ShortFast indoor", "EU_868", "SHORT_FAST",    1, 10,   0.0f,
-      "Tests rapproches en interieur, TX faible 10 dBm, hop=1", "" },
+      "Tests rapproches en interieur, TX faible 10 dBm, hop=1", SHORTFAST_CHANS_URL },
     { "LongSlow DX",      "EU_868", "LONG_SLOW",     5, 27,   0.0f,
-      "Portee maximale : LoRa SF12, debit minimal, lointain/relais", "" },
+      "Portee maximale : LoRa SF12, debit minimal, lointain/relais", LONGSLOW_CHANS_URL },
 };
 #define DEFAULT_PRESET_COUNT (int)(sizeof(kDefaultPresets) / sizeof(kDefaultPresets[0]))
 
@@ -141,14 +159,26 @@ static void presets_load(void)
     }
     fclose(f);
 
-    /* Migration : un fichier au format < 8 colonnes n'a pas de canaux lies.
-     * On backfill le preset "Gaulix FR" avec ses canaux et on persiste, pour
-     * que la liaison config<->canaux marche sur les installs existantes. */
+    /* Migration : les installs existantes ont des presets par defaut SANS canaux
+     * lies (champ chans vide). Du coup charger "LongFast public" laissait les
+     * canaux precedents (Fr_Balise...) -> mesh public inaudible. On backfill, par
+     * nom, les canaux par defaut de chaque preset connu quand chans est vide. */
+    static const struct { const char *name, *url; } kChanBackfill[] = {
+        { "Gaulix FR",        GAULIX_CHANS_URL     },
+        { "LongFast public",  LONGFAST_CHANS_URL   },
+        { "MediumFast",       MEDIUMFAST_CHANS_URL },
+        { "ShortFast indoor", SHORTFAST_CHANS_URL  },
+        { "LongSlow DX",      LONGSLOW_CHANS_URL   },
+    };
     bool migrated = false;
     for (int i = 0; i < s_preset_count; i++) {
-        if (!s_presets[i].chans[0] && strcmp(s_presets[i].name, "Gaulix FR") == 0) {
-            snprintf(s_presets[i].chans, sizeof(s_presets[i].chans), "%s", GAULIX_CHANS_URL);
-            migrated = true;
+        if (s_presets[i].chans[0]) continue;        /* deja des canaux : on respecte */
+        for (int k = 0; k < (int)(sizeof(kChanBackfill)/sizeof(kChanBackfill[0])); k++) {
+            if (strcmp(s_presets[i].name, kChanBackfill[k].name) == 0) {
+                snprintf(s_presets[i].chans, sizeof(s_presets[i].chans), "%s", kChanBackfill[k].url);
+                migrated = true;
+                break;
+            }
         }
     }
     if (migrated) presets_save();
@@ -271,19 +301,21 @@ static void do_apply(void)
     const char *ftxt = lv_textarea_get_text(r_ta_freq);
     if (ftxt && ftxt[0]) freq = strtof(ftxt, NULL);
 
-    /* #5 source unique : si une URL de canaux est presente, on applique
-     * UNIQUEMENT --seturl. L'URL (ChannelSet) embarque sa propre LoRaConfig
-     * (region/preset/freq), donc un seul appel CLI = un seul reboot, pas de
-     * conflit --seturl/--set. Sans URL, on configure la radio champ par champ
-     * via --set lora.*. */
+    /* #5 source unique : si une URL de canaux est presente, on applique via le
+     * helper apply_channels.py. Il REMPLACE TOTALEMENT les canaux : il supprime
+     * d'abord les secondaires residuels (que `--seturl` seul laisserait trainer
+     * -> Fr_Balise/Fr_EMCOM survivaient apres passage Gaulix->LongFast), puis
+     * pousse le ChannelSet de l'URL + sa LoRaConfig embarquee (region/preset/
+     * freq). Un seul appel = canaux propres + radio configuree. Sans URL, on
+     * configure la radio champ par champ via --set lora.* (canaux inchanges). */
     const char *ctxt = lv_textarea_get_text(r_ta_chans);
     bool has_chans = (ctxt && ctxt[0]);
 
     if (has_chans) {
         snprintf(s_deferred_apply_cmd, sizeof(s_deferred_apply_cmd),
-                 "%s --host 127.0.0.1 --seturl '%s' "
+                 "%s %s '%s' "
                  ">/tmp/radio_apply.log 2>&1",
-                 MESHTASTIC_CLI, ctxt);
+                 MESH_VENV_PY, APPLY_CHANS_PY, ctxt);
     } else {
         snprintf(s_deferred_apply_cmd, sizeof(s_deferred_apply_cmd),
                  "%s --host 127.0.0.1 "
@@ -329,7 +361,7 @@ static void apply_clicked(lv_event_t *e)
     if (has_chans) {
         int n = mesh_channel_count();
         off += (size_t)snprintf(warn + off, sizeof(warn) - off,
-            "Ce profil remplace tes %d canal(aux) actuel(s) par les canaux lies (--seturl efface l'ensemble).\n\n",
+            "Ce profil remplace tes %d canal(aux) actuel(s) par les canaux lies (suppression totale + reecriture).\n\n",
             n);
     }
 
@@ -489,6 +521,31 @@ static void close_clicked(lv_event_t *e)
     (void)e;
     if (r_ov) { lv_obj_delete(r_ov); r_ov = NULL; }
     lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* "Capturer" : snapshot des canaux ACTUELS de la radio (primaire+secondaires +
+ * LoRaConfig courante) dans le champ "Canaux lies". Workflow d'ajout persistant :
+ * ajouter/importer ses canaux dans le gestionnaire (Messages -> Canaux), revenir
+ * ici, Capturer, puis Save -> la preconfig retient desormais ces canaux et les
+ * re-pose a chaque Apply. */
+static void capture_chans_clicked(lv_event_t *e)
+{
+    (void)e;
+    if (!mesh_connected()) {
+        status_set("Radio non connectee", CY_AMBER);
+        ui_dialog_warning("Radio non connectee : impossible de lire les canaux actuels.");
+        return;
+    }
+    const char *url = mesh_channelset_url();
+    if (!url) {
+        status_set("Capture impossible", CY_MAGENTA);
+        ui_dialog_error("Impossible de construire l'URL des canaux actuels.");
+        return;
+    }
+    if (r_ta_chans) lv_textarea_set_text(r_ta_chans, url);
+    status_set("Canaux captures", CY_GREEN);
+    ui_dialog_info("Canaux actuels captures dans le champ \"Canaux lies\".\n"
+                   "Tape Save pour les rattacher a la preconfig.");
 }
 
 /* ------------------------------------------------------------ scroll-into-view
@@ -672,8 +729,20 @@ void ui_radio_open_e(lv_event_t *e)
     lv_obj_add_event_cb(r_ta_desc, set_ta_focus_e, LV_EVENT_FOCUSED, NULL);
 
     /* Canaux lies (URL de partage). Pre-rempli quand on charge un preset ;
-     * applique avec la config radio (--seturl) au Apply. Vide = canaux inchanges. */
+     * applique avec la config radio au Apply. Vide = canaux inchanges. */
     r_ta_chans = settings_field(r_ov, "Canaux lies (URL, optionnel)", "", false);
+
+    /* Capturer : recopie les canaux ACTUELS de la radio dans le champ ci-dessus
+     * (pour ajouter des canaux a une preconfig de maniere persistante : ajoute-les
+     * dans Messages -> Canaux, reviens, Capturer, puis Save). */
+    {
+        lv_obj_t *crow = lv_obj_create(r_ov);
+        lv_obj_set_size(crow, LV_PCT(100), LV_SIZE_CONTENT);
+        flat(crow); lv_obj_set_flex_flow(crow, LV_FLEX_FLOW_ROW);
+        lv_obj_clear_flag(crow, LV_OBJ_FLAG_SCROLLABLE);
+        small_button(crow, LV_SYMBOL_DOWNLOAD " Capturer canaux actuels",
+                     CY_CYAN, capture_chans_clicked);
+    }
 
     row = form_row(r_ov, "Charger");
     r_dd_load = lv_dropdown_create(row);

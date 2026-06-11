@@ -1,6 +1,7 @@
 #include "ui_common.h"
 #include "ui_chat.h"
 #include "ui_chanmgr.h"
+#include "ui_radio.h"
 #include "ui_dialog.h"
 #include "mesh.h"
 #include <stdio.h>
@@ -424,16 +425,22 @@ static void build_conv_list(void) {
     lv_obj_set_scroll_dir(conv_list, LV_DIR_VER);
     populate_conv_cards();
 
-    /* bouton gestion des canaux (pleine largeur) */
+    /* barre reseau LoRa : gestion des canaux + reglages radio cote a cote.
+     * Les deux touchent le meme domaine (le reseau mesh), on les regroupe ici
+     * plutot que d'eparpiller la radio sous Systeme. */
     lv_obj_t *mbar = lv_obj_create(content);
     lv_obj_set_size(mbar, LV_PCT(100), 38);
     flat(mbar);
     lv_obj_set_flex_flow(mbar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(mbar, 6, 0);
     lv_obj_clear_flag(mbar, LV_OBJ_FLAG_SCROLLABLE);
     {
         char mb[40];
         snprintf(mb, sizeof(mb), LV_SYMBOL_SETTINGS "  %s", tr(STR_CHANNELS_TITLE));
-        small_button(mbar, mb, CY_AMBER, ui_chanmgr_open_e);
+        lv_obj_t *bch = small_button(mbar, mb, CY_AMBER, ui_chanmgr_open_e);
+        lv_obj_set_flex_grow(bch, 1);
+        lv_obj_t *brd = small_button(mbar, LV_SYMBOL_WIFI "  Radio", CY_CYAN, ui_radio_open_e);
+        lv_obj_set_flex_grow(brd, 1);
     }
 }
 

@@ -1032,7 +1032,8 @@ static void sys_build_settings_tab(lv_obj_t *col)
         lv_obj_clear_flag(brow, LV_OBJ_FLAG_SCROLLABLE);
         char bm[40]; snprintf(bm, sizeof(bm), LV_SYMBOL_SETTINGS "%s", tr(STR_BTN_MODIFY));
         small_button(brow, bm,                          CY_CYAN,  ui_settings_open_e);
-        small_button(brow, LV_SYMBOL_WIFI " Radio",     CY_AMBER, ui_radio_open_e);
+        /* Le bouton Radio vit desormais sous Messages (a cote du gestionnaire de
+         * canaux), pour regrouper toute la config LoRa au meme endroit. */
     }
     label(s, tr(STR_SETTINGS_DETAILS), FONT_SMALL, CY_DIM);
 

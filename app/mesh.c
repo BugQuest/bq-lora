@@ -871,6 +871,14 @@ static void send_frame(const uint8_t *payload, size_t len)
 
 static void send_want_config(void)
 {
+    /* want_config_id demande au noeud un dump COMPLET de sa config courante.
+     * On purge la liste de canaux avant : le noeud ne re-emet QUE les canaux
+     * actifs (il n'envoie pas d'entree DISABLED pour un canal supprime). Sans
+     * ce reset, les secondaires retires par une nouvelle preconfig (ex.
+     * Gaulix->LongFast) resteraient affiches dans le chat indefiniment. Le dump
+     * qui suit (parse_channel) reconstruit s_chans depuis l'etat reel. */
+    s_chan_count = 0;
+
     uint8_t buf[16];
     pb_writer w; pb_writer_init(&w, buf, sizeof(buf));
     pb_field_varint(&w, 3, (uint32_t)time(NULL)); /* want_config_id */
@@ -1525,6 +1533,57 @@ const char *mesh_channel_share_url(int i)
     pb_field_bytes(&sw, 1, cs, cw.len);
     pb_field_bytes(&sw, 2, lc, lw.len);
     if (cw.ovf || lw.ovf || sw.ovf) return NULL;
+
+    const char *prefix = "https://meshtastic.org/e/#";
+    size_t pn = strlen(prefix);
+    memcpy(url, prefix, pn);
+    b64url_encode(set, sw.len, url + pn, sizeof(url) - pn);
+    return url;
+}
+
+/* URL ChannelSet de TOUT le set courant : primaire (role 1) puis secondaires
+ * (role 2), + la LoRaConfig COMPLETE (use_preset/preset/region/hop/tx/freq).
+ * Sert a "capturer" l'etat radio courant pour le persister dans une preconfig
+ * (champ chans) : on l'applique ensuite via apply_channels.py au Apply, ce qui
+ * re-pose canaux + radio a l'identique. NULL si vide ou overflow.
+ * NB : lora_config COMPLETE (pas seulement preset/region comme share_url) pour
+ * qu'une preconfig capturee ne reinitialise pas hop/tx/freq a son application. */
+const char *mesh_channelset_url(void)
+{
+    static char url[512];
+    if (s_chan_count == 0) return NULL;
+
+    uint8_t set[400];
+    pb_writer sw; pb_writer_init(&sw, set, sizeof(set));
+
+    /* settings[] : primaire d'abord (ChannelSet.settings[0] == PRIMARY pour
+     * setURL), puis les secondaires, dans l'ordre des index. */
+    for (int role = 1; role <= 2; role++) {
+        for (int i = 0; i < s_chan_count; i++) {
+            chan_slot_t *c = &s_chans[i];
+            if (c->role != role) continue;
+            uint8_t cs[80];                              /* ChannelSettings{psk,name} */
+            pb_writer cw; pb_writer_init(&cw, cs, sizeof(cs));
+            pb_field_bytes(&cw, 2, c->psk, c->psk_len);
+            pb_field_bytes(&cw, 3, (const uint8_t *)c->name, strlen(c->name));
+            if (cw.ovf) return NULL;
+            pb_field_bytes(&sw, 1, cs, cw.len);          /* settings (repeated) */
+        }
+    }
+
+    uint8_t lc[48];                                      /* LoRaConfig complete */
+    pb_writer lw; pb_writer_init(&lw, lc, sizeof(lc));
+    pb_field_varint(&lw, 1, 1);                          /* use_preset = true */
+    pb_field_varint(&lw, 2, s_preset_code);              /* modem_preset */
+    pb_field_varint(&lw, 7, s_region_code);              /* region */
+    if (s_self.hop_limit) pb_field_varint(&lw, 8, s_self.hop_limit);
+    pb_field_varint(&lw, 10, (uint32_t)s_self.tx_power); /* tx_power (dBm) */
+    if (s_self.override_freq > 0.0001f) {
+        uint32_t fb; memcpy(&fb, &s_self.override_freq, sizeof(fb));
+        pb_field_fixed32(&lw, 14, fb);                   /* override_frequency */
+    }
+    pb_field_bytes(&sw, 2, lc, lw.len);                  /* lora_config */
+    if (sw.ovf) return NULL;
 
     const char *prefix = "https://meshtastic.org/e/#";
     size_t pn = strlen(prefix);

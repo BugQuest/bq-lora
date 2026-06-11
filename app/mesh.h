@@ -83,6 +83,12 @@ const char *mesh_channel_share_url(int i);
 /* Importe le(s) canal(aux) d'une URL collée. Retourne le nombre ajouté, -1 si URL invalide. */
 int  mesh_channel_import_url(const char *url);
 
+/* URL "https://meshtastic.org/e/#..." de TOUT le set de canaux courant (primaire
+ * + secondaires) avec la LoRaConfig complete. Sert a capturer l'etat radio pour
+ * le persister dans une preconfig. Buffer interne (ecrase a chaque appel), NULL
+ * si aucun canal ou overflow. */
+const char *mesh_channelset_url(void);
+
 /* Renomme le nœud local sur le mesh (AdminMessage set_owner). long_name = nom
  * complet diffusé aux autres nœuds ; short_name = 1 à 4 caractères. Nécessite la
  * liaison active. Retourne false si nœud non prêt ou long_name vide. */
